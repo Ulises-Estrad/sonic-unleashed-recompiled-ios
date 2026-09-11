@@ -1,0 +1,1184 @@
+diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
+index 6f3a2e7..28a2a56 100644
+--- a/UnleashedRecomp/CMakeLists.txt
++++ b/UnleashedRecomp/CMakeLists.txt
+@@ -187,6 +187,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
+     "ui/message_window.cpp"
+     "ui/options_menu.cpp"
+     "ui/options_menu_thumbnails.cpp"
++    "ui/touch_controls.cpp"
+     "ui/tv_static.cpp"
+ )
+ 
+@@ -485,6 +486,7 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+ )
+ 
+ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS)
+     list(PREPEND UNLEASHED_RECOMP_LINK_LIBS SDL2::SDL2main)
+     list(APPEND UNLEASHED_RECOMP_LINK_LIBS "-framework UniformTypeIdentifiers")
+ endif()
+diff --git a/UnleashedRecomp/apple_utils.h b/UnleashedRecomp/apple_utils.h
+index 643786e..94ca973 100644
+--- a/UnleashedRecomp/apple_utils.h
++++ b/UnleashedRecomp/apple_utils.h
+@@ -8,6 +8,10 @@ namespace apple {
+ /// Returns absolute path suitable for user-editable files like saves and mods
+ std::filesystem::path GetUserDataDirectory();
+ 
++/// Get the main application bundle's resource directory.
++/// On iOS this is the read-only .app root used for bundled game data.
++std::filesystem::path GetBundleResourceDirectory();
++
+ /// Get the application support directory (Library/Application Support)
+ /// Returns absolute path suitable for app configuration and preferences
+ std::filesystem::path GetApplicationSupportDirectory();
+diff --git a/UnleashedRecomp/apple_utils.mm b/UnleashedRecomp/apple_utils.mm
+index e2ec228..335e530 100644
+--- a/UnleashedRecomp/apple_utils.mm
++++ b/UnleashedRecomp/apple_utils.mm
+@@ -12,6 +12,18 @@
+ 
+ namespace apple {
+ 
++std::filesystem::path GetBundleResourceDirectory() {
++  @try {
++    NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
++    if (resourcePath != nil) {
++      return std::filesystem::path([resourcePath UTF8String]);
++    }
++  } @catch (NSException *exception) {
++  }
++
++  return std::filesystem::path();
++}
++
+ std::filesystem::path GetUserDataDirectory() {
+   NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
+                                                        NSUserDomainMask, YES);
+diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
+index 0205276..f5ed541 100644
+--- a/UnleashedRecomp/gpu/video.cpp
++++ b/UnleashedRecomp/gpu/video.cpp
+@@ -28,6 +28,7 @@
+ #include <ui/options_menu.h>
+ #include <ui/game_window.h>
+ #include <ui/black_bar.h>
++#include <ui/touch_controls.h>
+ #include <patches/aspect_ratio_patches.h>
+ #include <user/config.h>
+ #include <sdl_listener.h>
+@@ -1428,6 +1429,7 @@ static void CreateImGuiBackend()
+     MessageWindow::Init();
+     OptionsMenu::Init();
+     InstallerWizard::Init();
++    TouchControls::Init();
+ 
+     ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
+ 
+@@ -2676,6 +2678,8 @@ static void DrawImGui()
+     ButtonGuide::Draw();
+     Fader::Draw();
+     BlackBar::Draw();
++    TouchControls::SetActive(App::s_isInit && !InstallerWizard::s_isVisible);
++    TouchControls::Draw();
+ 
+     assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
+ 
+diff --git a/UnleashedRecomp/hid/driver/sdl_hid.cpp b/UnleashedRecomp/hid/driver/sdl_hid.cpp
+index 7623552..7cf0f5e 100644
+--- a/UnleashedRecomp/hid/driver/sdl_hid.cpp
++++ b/UnleashedRecomp/hid/driver/sdl_hid.cpp
+@@ -4,6 +4,7 @@
+ #include <hid/hid.h>
+ #include <os/logger.h>
+ #include <ui/game_window.h>
++#include <ui/touch_controls.h>
+ #include <kernel/xdm.h>
+ #include <app.h>
+ 
+@@ -288,6 +289,9 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
+         case SDL_MOUSEBUTTONDOWN:
+         case SDL_MOUSEBUTTONUP:
+         {
++            if (TouchControls::CapturesEmulatedMouse(event))
++                break;
++
+             if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
+                 SDL_ShowCursor(SDL_ENABLE);
+ 
+@@ -352,10 +356,16 @@ uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
+ 
+     pState->dwPacketNumber = packet++;
+ 
+-    if (!g_activeController)
++    const bool touchActive = TouchControls::IsActive();
++
++    if (!g_activeController && !touchActive)
+         return ERROR_DEVICE_NOT_CONNECTED;
+ 
+-    pState->Gamepad = g_activeController->state;
++    if (g_activeController)
++        pState->Gamepad = g_activeController->state;
++
++    if (touchActive)
++        TouchControls::ApplyToState(pState->Gamepad);
+ 
+     return ERROR_SUCCESS;
+ }
+@@ -365,6 +375,9 @@ uint32_t hid::SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration)
+     if (!pVibration)
+         return ERROR_BAD_ARGUMENTS;
+ 
++    if (!g_activeController && TouchControls::IsActive())
++        return ERROR_SUCCESS;
++
+     if (!g_activeController)
+         return ERROR_DEVICE_NOT_CONNECTED;
+ 
+@@ -378,7 +391,9 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
+     if (!pCaps)
+         return ERROR_BAD_ARGUMENTS;
+ 
+-    if (!g_activeController)
++    const bool touchActive = TouchControls::IsActive();
++
++    if (!g_activeController && !touchActive)
+         return ERROR_DEVICE_NOT_CONNECTED;
+ 
+     memset(pCaps, 0, sizeof(*pCaps));
+@@ -386,8 +401,14 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
+     pCaps->Type = XAMINPUT_DEVTYPE_GAMEPAD;
+     pCaps->SubType = XAMINPUT_DEVSUBTYPE_GAMEPAD; // TODO: other types?
+     pCaps->Flags = 0;
+-    pCaps->Gamepad = g_activeController->state;
+-    pCaps->Vibration = g_activeController->vibration;
++    if (g_activeController)
++    {
++        pCaps->Gamepad = g_activeController->state;
++        pCaps->Vibration = g_activeController->vibration;
++    }
++
++    if (touchActive)
++        TouchControls::ApplyToState(pCaps->Gamepad);
+ 
+     return ERROR_SUCCESS;
+ }
+diff --git a/UnleashedRecomp/main.cpp b/UnleashedRecomp/main.cpp
+index e34d7e1..3f37fcb 100644
+--- a/UnleashedRecomp/main.cpp
++++ b/UnleashedRecomp/main.cpp
+@@ -213,6 +213,9 @@ int main(int argc, char *argv[])
+ 
+     os::logger::Init();
+ 
++    if (!SeedBundledSaveData())
++        LOGN_WARNING("Unable to seed the bundled save data; existing user saves were left unchanged.");
++
+ #if TARGET_OS_IOS
+     if (!apple::SupportsBCTextures()) {
+         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_iOS_UnsupportedGPU_BCTextures").c_str(), GameWindow::s_pWindow);
+diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
+index 817db38..5f90b2d 100644
+--- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
++++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
+@@ -18,7 +18,7 @@
+         <key>CFBundleVersion</key>
+         <string>@IOS_BUNDLE_VERSION@</string>
+         <key>MinimumOSVersion</key>
+-        <string>@IOS_DEPLOYMENT_TARGET@</string>
++        <string>@CMAKE_OSX_DEPLOYMENT_TARGET@</string>
+         <key>UIDeviceFamily</key>
+         <array>
+             <integer>1</integer>
+diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
+index 5f1259a..1db712d 100644
+--- a/UnleashedRecomp/ui/game_window.cpp
++++ b/UnleashedRecomp/ui/game_window.cpp
+@@ -1,4 +1,5 @@
+ #include "game_window.h"
++#include <ui/touch_controls.h>
+ #include <gpu/video.h>
+ #include <os/logger.h>
+ #include <os/user.h>
+@@ -20,7 +21,7 @@ bool m_isResizing = false;
+ 
+ int Window_OnSDLEvent(void*, SDL_Event* event)
+ {
+-    if (ImGui::GetIO().BackendPlatformUserData != nullptr)
++    if (!TouchControls::CapturesEmulatedMouse(event) && ImGui::GetIO().BackendPlatformUserData != nullptr)
+         ImGui_ImplSDL2_ProcessEvent(event);
+ 
+     for (auto listener : GetEventListeners())
+diff --git a/UnleashedRecomp/ui/touch_controls.cpp b/UnleashedRecomp/ui/touch_controls.cpp
+new file mode 100644
+index 0000000..da123f2
+--- /dev/null
++++ b/UnleashedRecomp/ui/touch_controls.cpp
+@@ -0,0 +1,629 @@
++#include "touch_controls.h"
++
++#include <algorithm>
++#include <array>
++#include <cfloat>
++#include <cmath>
++#include <cstddef>
++#include <cstdint>
++#include <vector>
++
++#include <imgui.h>
++
++#include <hid/hid.h>
++#include <sdl_listener.h>
++
++namespace
++{
++    constexpr SDL_FingerID NO_FINGER = -1;
++
++    enum class FaceSymbol
++    {
++        None,
++        Square,
++        Triangle,
++        Circle,
++        Cross
++    };
++
++    struct VirtualButton
++    {
++        ImVec2 centre{};
++        ImVec2 minimum{};
++        ImVec2 maximum{};
++        float drawRadius{};
++        float hitRadius{};
++        uint16_t buttonMask{};
++        FaceSymbol symbol{ FaceSymbol::None };
++        const char* label{};
++        SDL_FingerID fingerId{ NO_FINGER };
++        bool isCapsule{};
++        bool isRightTrigger{};
++        bool pressed{};
++    };
++
++    struct VirtualStick
++    {
++        ImVec2 centre{};
++        ImVec2 delta{};
++        float radius{};
++        float hitRadius{};
++        SDL_FingerID fingerId{ NO_FINGER };
++    };
++
++    enum ButtonIndex : size_t
++    {
++        BUTTON_SQUARE,
++        BUTTON_TRIANGLE,
++        BUTTON_CIRCLE,
++        BUTTON_CROSS,
++        BUTTON_L1,
++        BUTTON_R1,
++        BUTTON_R2,
++        BUTTON_COUNT
++    };
++
++    static VirtualStick g_leftStick;
++    static std::array<VirtualButton, BUTTON_COUNT> g_buttons;
++    static XAMINPUT_GAMEPAD g_gamepadState{};
++    static bool g_isActive;
++    static float g_viewportWidth = 1280.0f;
++    static float g_viewportHeight = 720.0f;
++
++    static float DistanceSquared(const ImVec2& a, const ImVec2& b)
++    {
++        const float x = a.x - b.x;
++        const float y = a.y - b.y;
++        return x * x + y * y;
++    }
++
++    static float ViewportWidth()
++    {
++        return g_viewportWidth;
++    }
++
++    static float ViewportHeight()
++    {
++        return g_viewportHeight;
++    }
++
++    static ImVec2 GetTouchPoint(const SDL_TouchFingerEvent& touch)
++    {
++        int drawableWidth = 0;
++        int drawableHeight = 0;
++
++        if (SDL_Window* window = SDL_GetWindowFromID(touch.windowID))
++            SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight);
++
++        if (drawableWidth <= 0 || drawableHeight <= 0)
++            return { touch.x * ViewportWidth(), touch.y * ViewportHeight() };
++
++        const float offsetX = (float(drawableWidth) - ViewportWidth()) * 0.5f;
++        const float offsetY = (float(drawableHeight) - ViewportHeight()) * 0.5f;
++        return {
++            touch.x * float(drawableWidth) - offsetX,
++            touch.y * float(drawableHeight) - offsetY
++        };
++    }
++
++    static void ConfigureCircleButton(
++        ButtonIndex index,
++        const ImVec2& centre,
++        float drawRadius,
++        uint16_t buttonMask,
++        FaceSymbol symbol)
++    {
++        auto& button = g_buttons[index];
++        button.centre = centre;
++        button.drawRadius = drawRadius;
++        button.hitRadius = drawRadius * 1.42f;
++        button.buttonMask = buttonMask;
++        button.symbol = symbol;
++        button.label = nullptr;
++        button.isCapsule = false;
++        button.isRightTrigger = false;
++    }
++
++    static void ConfigureCapsuleButton(
++        ButtonIndex index,
++        const ImVec2& centre,
++        float width,
++        float height,
++        const char* label,
++        uint16_t buttonMask,
++        bool isRightTrigger = false)
++    {
++        auto& button = g_buttons[index];
++        button.centre = centre;
++        button.minimum = { centre.x - width * 0.5f, centre.y - height * 0.5f };
++        button.maximum = { centre.x + width * 0.5f, centre.y + height * 0.5f };
++        button.drawRadius = height * 0.5f;
++        button.hitRadius = 0.0f;
++        button.buttonMask = buttonMask;
++        button.symbol = FaceSymbol::None;
++        button.label = label;
++        button.isCapsule = true;
++        button.isRightTrigger = isRightTrigger;
++    }
++
++    static void UpdateLayout()
++    {
++        const float width = ViewportWidth();
++        const float height = ViewportHeight();
++        const float scale = std::max(0.5f, height / 720.0f);
++        const float edgeInset = std::max(44.0f * scale, width * 0.04f);
++        const float bottomInset = 44.0f * scale;
++
++        const float stickRadius = 84.0f * scale;
++        g_leftStick.centre = { edgeInset + stickRadius, height - bottomInset - stickRadius };
++        g_leftStick.radius = stickRadius;
++        g_leftStick.hitRadius = stickRadius * 1.38f;
++
++        const float faceRadius = 35.0f * scale;
++        const float faceGap = 73.0f * scale;
++        const ImVec2 faceCentre = {
++            width - edgeInset - faceRadius - faceGap,
++            height - bottomInset - faceRadius - faceGap
++        };
++
++        ConfigureCircleButton(BUTTON_SQUARE,
++            { faceCentre.x - faceGap, faceCentre.y }, faceRadius,
++            XAMINPUT_GAMEPAD_X, FaceSymbol::Square);
++        ConfigureCircleButton(BUTTON_TRIANGLE,
++            { faceCentre.x, faceCentre.y - faceGap }, faceRadius,
++            XAMINPUT_GAMEPAD_Y, FaceSymbol::Triangle);
++        ConfigureCircleButton(BUTTON_CIRCLE,
++            { faceCentre.x + faceGap, faceCentre.y }, faceRadius,
++            XAMINPUT_GAMEPAD_B, FaceSymbol::Circle);
++        ConfigureCircleButton(BUTTON_CROSS,
++            { faceCentre.x, faceCentre.y + faceGap }, faceRadius,
++            XAMINPUT_GAMEPAD_A, FaceSymbol::Cross);
++
++        const float shoulderWidth = 78.0f * scale;
++        const float shoulderHeight = 44.0f * scale;
++        const float shoulderGap = 10.0f * scale;
++        const float shoulderOffset = (shoulderWidth + shoulderGap) * 0.5f;
++        const float shoulderY = g_leftStick.centre.y - g_leftStick.radius - 54.0f * scale;
++
++        ConfigureCapsuleButton(BUTTON_L1,
++            { g_leftStick.centre.x - shoulderOffset, shoulderY },
++            shoulderWidth, shoulderHeight, "L1", XAMINPUT_GAMEPAD_LEFT_SHOULDER);
++        ConfigureCapsuleButton(BUTTON_R1,
++            { g_leftStick.centre.x + shoulderOffset, shoulderY },
++            shoulderWidth, shoulderHeight, "R1", XAMINPUT_GAMEPAD_RIGHT_SHOULDER);
++
++        ConfigureCapsuleButton(BUTTON_R2,
++            {
++                width - edgeInset - shoulderWidth * 0.5f,
++                faceCentre.y - faceGap * 1.48f
++            },
++            shoulderWidth, shoulderHeight, "R2", 0, true);
++    }
++
++    static bool HitTest(const VirtualButton& button, const ImVec2& point)
++    {
++        if (!button.isCapsule)
++            return DistanceSquared(button.centre, point) <= button.hitRadius * button.hitRadius;
++
++        const float padding = button.drawRadius * 0.35f;
++        return point.x >= button.minimum.x - padding && point.x <= button.maximum.x + padding &&
++            point.y >= button.minimum.y - padding && point.y <= button.maximum.y + padding;
++    }
++
++    static VirtualButton* FindButton(const ImVec2& point, SDL_FingerID fingerId)
++    {
++        VirtualButton* result = nullptr;
++        float nearestDistance = FLT_MAX;
++
++        for (auto& button : g_buttons)
++        {
++            if ((button.fingerId != NO_FINGER && button.fingerId != fingerId) || !HitTest(button, point))
++                continue;
++
++            const float distance = DistanceSquared(button.centre, point);
++            if (distance < nearestDistance)
++            {
++                nearestDistance = distance;
++                result = &button;
++            }
++        }
++
++        return result;
++    }
++
++    static void RebuildButtons()
++    {
++        g_gamepadState.wButtons = 0;
++        g_gamepadState.bRightTrigger = 0;
++
++        for (const auto& button : g_buttons)
++        {
++            if (!button.pressed)
++                continue;
++
++            if (button.isRightTrigger)
++                g_gamepadState.bRightTrigger = 255;
++            else
++                g_gamepadState.wButtons |= button.buttonMask;
++        }
++    }
++
++    static void ResetState()
++    {
++        g_gamepadState = {};
++        g_leftStick.delta = {};
++        g_leftStick.fingerId = NO_FINGER;
++
++        for (auto& button : g_buttons)
++        {
++            button.fingerId = NO_FINGER;
++            button.pressed = false;
++        }
++    }
++
++    static void SetStickPoint(const ImVec2& point)
++    {
++        ImVec2 delta = { point.x - g_leftStick.centre.x, point.y - g_leftStick.centre.y };
++        const float length = sqrtf(delta.x * delta.x + delta.y * delta.y);
++
++        if (length > g_leftStick.radius && length > 0.0f)
++        {
++            const float clampScale = g_leftStick.radius / length;
++            delta.x *= clampScale;
++            delta.y *= clampScale;
++        }
++
++        g_leftStick.delta = delta;
++        g_gamepadState.sThumbLX = int16_t(std::clamp(delta.x / g_leftStick.radius, -1.0f, 1.0f) * 32767.0f);
++        g_gamepadState.sThumbLY = int16_t(std::clamp(-delta.y / g_leftStick.radius, -1.0f, 1.0f) * 32767.0f);
++    }
++
++    static void MarkTouchInputActive()
++    {
++        hid::g_inputDevice = hid::EInputDevice::PlayStation;
++        hid::g_inputDeviceController = hid::EInputDevice::PlayStation;
++        hid::g_inputDeviceExplicit = hid::EInputDeviceExplicit::DualSense;
++        SDL_ShowCursor(SDL_DISABLE);
++    }
++
++    static bool HandleFingerDown(SDL_FingerID fingerId, const ImVec2& point)
++    {
++        if (auto* button = FindButton(point, fingerId))
++        {
++            button->fingerId = fingerId;
++            button->pressed = true;
++            RebuildButtons();
++            MarkTouchInputActive();
++            return true;
++        }
++
++        if (g_leftStick.fingerId == NO_FINGER &&
++            DistanceSquared(g_leftStick.centre, point) <= g_leftStick.hitRadius * g_leftStick.hitRadius)
++        {
++            g_leftStick.fingerId = fingerId;
++            SetStickPoint(point);
++            MarkTouchInputActive();
++            return true;
++        }
++
++        return false;
++    }
++
++    static bool HandleFingerMotion(SDL_FingerID fingerId, const ImVec2& point)
++    {
++        if (g_leftStick.fingerId == fingerId)
++        {
++            SetStickPoint(point);
++            return true;
++        }
++
++        const auto ownedButtonIterator = std::find_if(g_buttons.begin(), g_buttons.end(),
++            [fingerId](const VirtualButton& button) { return button.fingerId == fingerId; });
++        if (ownedButtonIterator == g_buttons.end())
++            return false;
++
++        auto* ownedButton = &*ownedButtonIterator;
++
++        if (HitTest(*ownedButton, point))
++            return true;
++
++        ownedButton->fingerId = NO_FINGER;
++        ownedButton->pressed = false;
++
++        if (auto* nextButton = FindButton(point, fingerId))
++        {
++            nextButton->fingerId = fingerId;
++            nextButton->pressed = true;
++        }
++
++        RebuildButtons();
++        return true;
++    }
++
++    static bool HandleFingerUp(SDL_FingerID fingerId)
++    {
++        if (g_leftStick.fingerId == fingerId)
++        {
++            g_leftStick.fingerId = NO_FINGER;
++            g_leftStick.delta = {};
++            g_gamepadState.sThumbLX = 0;
++            g_gamepadState.sThumbLY = 0;
++            return true;
++        }
++
++        bool released = false;
++        for (auto& button : g_buttons)
++        {
++            if (button.fingerId != fingerId)
++                continue;
++
++            button.fingerId = NO_FINGER;
++            button.pressed = false;
++            released = true;
++        }
++
++        if (released)
++            RebuildButtons();
++
++        return released;
++    }
++
++    static ImU32 WithAlpha(ImU32 colour, uint8_t alpha)
++    {
++        return (colour & IM_COL32(255, 255, 255, 0)) | (ImU32(alpha) << IM_COL32_A_SHIFT);
++    }
++
++    static ImU32 SymbolColour(FaceSymbol symbol)
++    {
++        switch (symbol)
++        {
++            case FaceSymbol::Square:
++                return IM_COL32(255, 126, 207, 255);
++            case FaceSymbol::Triangle:
++                return IM_COL32(87, 229, 157, 255);
++            case FaceSymbol::Circle:
++                return IM_COL32(255, 116, 137, 255);
++            case FaceSymbol::Cross:
++                return IM_COL32(104, 192, 255, 255);
++            default:
++                return IM_COL32_WHITE;
++        }
++    }
++
++    static void DrawFaceSymbol(ImDrawList* drawList, const VirtualButton& button, float scale)
++    {
++        const ImU32 colour = WithAlpha(SymbolColour(button.symbol), button.pressed ? 255 : 220);
++        const float size = button.drawRadius * 0.39f;
++        const float thickness = 3.0f * scale;
++        const ImVec2 centre = button.centre;
++
++        switch (button.symbol)
++        {
++            case FaceSymbol::Square:
++                drawList->AddRect(
++                    { centre.x - size, centre.y - size },
++                    { centre.x + size, centre.y + size },
++                    colour, 1.5f * scale, 0, thickness);
++                break;
++
++            case FaceSymbol::Triangle:
++                drawList->AddTriangle(
++                    { centre.x, centre.y - size * 1.15f },
++                    { centre.x - size, centre.y + size * 0.82f },
++                    { centre.x + size, centre.y + size * 0.82f },
++                    colour, thickness);
++                break;
++
++            case FaceSymbol::Circle:
++                drawList->AddCircle(centre, size, colour, 32, thickness);
++                break;
++
++            case FaceSymbol::Cross:
++                drawList->AddLine(
++                    { centre.x - size, centre.y - size },
++                    { centre.x + size, centre.y + size }, colour, thickness);
++                drawList->AddLine(
++                    { centre.x + size, centre.y - size },
++                    { centre.x - size, centre.y + size }, colour, thickness);
++                break;
++
++            default:
++                break;
++        }
++    }
++
++    static void DrawFaceButton(ImDrawList* drawList, const VirtualButton& button, float scale)
++    {
++        const ImU32 fill = button.pressed ? IM_COL32(61, 127, 205, 178) : IM_COL32(17, 24, 39, 96);
++        const ImU32 border = button.pressed ? IM_COL32(205, 233, 255, 245) : IM_COL32(224, 233, 246, 158);
++
++        if (button.pressed)
++            drawList->AddCircleFilled(button.centre, button.drawRadius + 5.0f * scale, IM_COL32(89, 176, 255, 46), 36);
++
++        drawList->AddCircleFilled(button.centre, button.drawRadius, fill, 36);
++        drawList->AddCircle(button.centre, button.drawRadius, border, 36, 2.0f * scale);
++        DrawFaceSymbol(drawList, button, scale);
++    }
++
++    static void DrawCapsuleButton(ImDrawList* drawList, const VirtualButton& button, float scale)
++    {
++        const ImU32 fill = button.pressed ? IM_COL32(61, 127, 205, 190) : IM_COL32(17, 24, 39, 108);
++        const ImU32 border = button.pressed ? IM_COL32(205, 233, 255, 245) : IM_COL32(224, 233, 246, 170);
++        const float rounding = button.drawRadius;
++
++        if (button.pressed)
++        {
++            drawList->AddRectFilled(
++                { button.minimum.x - 4.0f * scale, button.minimum.y - 4.0f * scale },
++                { button.maximum.x + 4.0f * scale, button.maximum.y + 4.0f * scale },
++                IM_COL32(89, 176, 255, 44), rounding + 4.0f * scale);
++        }
++
++        drawList->AddRectFilled(button.minimum, button.maximum, fill, rounding);
++        drawList->AddRect(button.minimum, button.maximum, border, rounding, 0, 2.0f * scale);
++
++        const ImFont* font = ImGui::GetFont();
++        const float fontSize = 17.0f * scale;
++        const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, button.label);
++        drawList->AddText(
++            font,
++            fontSize,
++            { button.centre.x - textSize.x * 0.5f, button.centre.y - textSize.y * 0.5f },
++            IM_COL32(240, 246, 255, 235),
++            button.label);
++    }
++
++    static void DrawStick(ImDrawList* drawList, float scale)
++    {
++        const bool pressed = g_leftStick.fingerId != NO_FINGER;
++        const ImVec2 knobCentre = {
++            g_leftStick.centre.x + g_leftStick.delta.x,
++            g_leftStick.centre.y + g_leftStick.delta.y
++        };
++
++        drawList->AddCircleFilled(g_leftStick.centre, g_leftStick.radius, IM_COL32(17, 24, 39, 78), 48);
++        drawList->AddCircle(g_leftStick.centre, g_leftStick.radius, IM_COL32(224, 233, 246, 145), 48, 2.0f * scale);
++        drawList->AddCircle(g_leftStick.centre, g_leftStick.radius * 0.58f, IM_COL32(224, 233, 246, 55), 40, 1.5f * scale);
++
++        if (pressed)
++            drawList->AddCircleFilled(knobCentre, g_leftStick.radius * 0.39f, IM_COL32(89, 176, 255, 72), 36);
++
++        drawList->AddCircleFilled(
++            knobCentre,
++            g_leftStick.radius * 0.31f,
++            pressed ? IM_COL32(164, 218, 255, 218) : IM_COL32(231, 238, 248, 178),
++            36);
++        drawList->AddCircle(
++            knobCentre,
++            g_leftStick.radius * 0.31f,
++            IM_COL32(255, 255, 255, 205),
++            36,
++            1.5f * scale);
++    }
++
++    class TouchEventListener : public SDLEventListener
++    {
++    public:
++        bool OnSDLEvent(SDL_Event* event) override
++        {
++            if (event->type == SDL_APP_WILLENTERBACKGROUND ||
++                (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_FOCUS_LOST))
++            {
++                ResetState();
++                return false;
++            }
++
++            if (!TouchControls::IsActive())
++                return false;
++
++            UpdateLayout();
++
++            switch (event->type)
++            {
++                case SDL_FINGERDOWN:
++                    return HandleFingerDown(event->tfinger.fingerId, GetTouchPoint(event->tfinger));
++
++                case SDL_FINGERMOTION:
++                    return HandleFingerMotion(event->tfinger.fingerId, GetTouchPoint(event->tfinger));
++
++                case SDL_FINGERUP:
++                    return HandleFingerUp(event->tfinger.fingerId);
++
++                default:
++                    return false;
++            }
++        }
++    };
++
++    static TouchEventListener g_touchEventListener;
++}
++
++void TouchControls::Init()
++{
++    g_isActive = false;
++    UpdateLayout();
++    ResetState();
++}
++
++void TouchControls::SetActive(bool active)
++{
++    if (g_isActive && !active)
++        ResetState();
++
++    g_isActive = active;
++}
++
++bool TouchControls::IsActive()
++{
++#ifdef UNLEASHED_RECOMP_IOS
++    return g_isActive;
++#else
++    return false;
++#endif
++}
++
++bool TouchControls::CapturesEmulatedMouse(const SDL_Event* event)
++{
++    if (!IsActive() || !event)
++        return false;
++
++    switch (event->type)
++    {
++        case SDL_MOUSEBUTTONDOWN:
++        case SDL_MOUSEBUTTONUP:
++            return event->button.which == SDL_TOUCH_MOUSEID;
++
++        case SDL_MOUSEMOTION:
++            return event->motion.which == SDL_TOUCH_MOUSEID;
++
++        default:
++            return false;
++    }
++}
++
++XAMINPUT_GAMEPAD TouchControls::GetState()
++{
++    return g_gamepadState;
++}
++
++void TouchControls::ApplyToState(XAMINPUT_GAMEPAD& state)
++{
++    const auto touchState = GetState();
++    state.wButtons |= touchState.wButtons;
++    state.bLeftTrigger = std::max(state.bLeftTrigger, touchState.bLeftTrigger);
++    state.bRightTrigger = std::max(state.bRightTrigger, touchState.bRightTrigger);
++
++    if (touchState.sThumbLX != 0 || touchState.sThumbLY != 0)
++    {
++        state.sThumbLX = touchState.sThumbLX;
++        state.sThumbLY = touchState.sThumbLY;
++    }
++}
++
++void TouchControls::Draw()
++{
++    if (!IsActive())
++        return;
++
++    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
++    if (displaySize.x > 0.0f && displaySize.y > 0.0f)
++    {
++        g_viewportWidth = displaySize.x;
++        g_viewportHeight = displaySize.y;
++    }
++
++    UpdateLayout();
++
++    const float scale = std::max(0.5f, ViewportHeight() / 720.0f);
++    ImDrawList* drawList = ImGui::GetForegroundDrawList();
++
++    DrawStick(drawList, scale);
++
++    for (const auto& button : g_buttons)
++    {
++        if (button.isCapsule)
++            DrawCapsuleButton(drawList, button, scale);
++        else
++            DrawFaceButton(drawList, button, scale);
++    }
++}
+diff --git a/UnleashedRecomp/ui/touch_controls.h b/UnleashedRecomp/ui/touch_controls.h
+new file mode 100644
+index 0000000..fe5e6b0
+--- /dev/null
++++ b/UnleashedRecomp/ui/touch_controls.h
+@@ -0,0 +1,16 @@
++#pragma once
++
++#include <SDL.h>
++#include <xbox.h>
++
++namespace TouchControls
++{
++    void Init();
++    void SetActive(bool active);
++    void Draw();
++
++    bool IsActive();
++    bool CapturesEmulatedMouse(const SDL_Event* event);
++    XAMINPUT_GAMEPAD GetState();
++    void ApplyToState(XAMINPUT_GAMEPAD& state);
++}
+diff --git a/UnleashedRecomp/user/paths.cpp b/UnleashedRecomp/user/paths.cpp
+index e72b473..ff9b3c8 100644
+--- a/UnleashedRecomp/user/paths.cpp
++++ b/UnleashedRecomp/user/paths.cpp
+@@ -61,3 +61,62 @@ const std::filesystem::path& GetUserPath()
+ {
+     return g_userPath;
+ }
++
++std::filesystem::path GetGamePath()
++{
++#if defined(__APPLE__)
++#if TARGET_OS_IPHONE
++    const std::filesystem::path bundledGamePath = apple::GetBundleResourceDirectory() / "GameData";
++    if (std::filesystem::exists(bundledGamePath / "game" / "default.xex") &&
++        std::filesystem::exists(bundledGamePath / "update" / "default.xexp") &&
++        std::filesystem::exists(bundledGamePath / "patched" / "default.xex"))
++    {
++        return bundledGamePath;
++    }
++#endif
++
++    // Apple app bundles are read-only. Non-bundled installs remain in the
++    // user directory, preserving the existing Finder/Files import workflow.
++    return GetUserPath();
++#else
++    return GAME_INSTALL_DIRECTORY;
++#endif
++}
++
++bool SeedBundledSaveData()
++{
++#if defined(__APPLE__) && TARGET_OS_IPHONE
++    const std::filesystem::path bundledSavePath = GetGamePath() / "save";
++    if (!std::filesystem::exists(bundledSavePath) || bundledSavePath == (GetUserPath() / "save"))
++        return true;
++
++    const std::filesystem::path userSavePath = GetUserPath() / "save";
++    std::error_code ec;
++    std::filesystem::create_directories(userSavePath, ec);
++    if (ec)
++        return false;
++
++    for (std::filesystem::recursive_directory_iterator it(bundledSavePath, ec), end; it != end && !ec; it.increment(ec))
++    {
++        const std::filesystem::path relativePath = std::filesystem::relative(it->path(), bundledSavePath, ec);
++        if (ec)
++            break;
++
++        const std::filesystem::path destinationPath = userSavePath / relativePath;
++        if (it->is_directory(ec))
++        {
++            std::filesystem::create_directories(destinationPath, ec);
++        }
++        else if (it->is_regular_file(ec) && !std::filesystem::exists(destinationPath))
++        {
++            std::filesystem::create_directories(destinationPath.parent_path(), ec);
++            if (!ec)
++                std::filesystem::copy_file(it->path(), destinationPath, std::filesystem::copy_options::none, ec);
++        }
++    }
++
++    return !ec;
++#else
++    return true;
++#endif
++}
+diff --git a/UnleashedRecomp/user/paths.h b/UnleashedRecomp/user/paths.h
+index ecb3e04..b6c2d2f 100644
+--- a/UnleashedRecomp/user/paths.h
++++ b/UnleashedRecomp/user/paths.h
+@@ -13,18 +13,8 @@ extern std::filesystem::path g_executableRoot;
+ bool CheckPortable();
+ std::filesystem::path BuildUserPath();
+ const std::filesystem::path& GetUserPath();
+-
+-inline std::filesystem::path GetGamePath()
+-{
+-#ifdef __APPLE__
+-    // On macOS, there is the expectation that the app may be installed to
+-    // /Applications/, and the bundle should not be modified. Thus we need
+-    // to install game files to the user directory instead of next to the app.
+-    return GetUserPath();
+-#else
+-    return GAME_INSTALL_DIRECTORY;
+-#endif
+-}
++std::filesystem::path GetGamePath();
++bool SeedBundledSaveData();
+ 
+ inline std::filesystem::path GetSavePath(bool checkForMods)
+ {
+diff --git a/tools/bundle_ios_game_data.py b/tools/bundle_ios_game_data.py
+new file mode 100644
+index 0000000..f35de67
+--- /dev/null
++++ b/tools/bundle_ios_game_data.py
+@@ -0,0 +1,104 @@
++"""Stage and verify self-contained Unleashed Recompiled iOS game data."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import shutil
++import zipfile
++
++
++DIRECTORIES = ("game", "update", "dlc", "patched", "save")
++REQUIRED_FILES = (
++    "game/default.xex",
++    "game/shader.ar",
++    "update/default.xexp",
++    "patched/default.xex",
++    "save/SYS-DATA",
++)
++MANIFEST_NAME = "BundledGameData-manifest.json"
++
++
++def digest_file(path: Path) -> str:
++    with path.open("rb") as stream:
++        return hashlib.file_digest(stream, "sha256").hexdigest()
++
++
++def validate_source(source: Path) -> None:
++    for directory in DIRECTORIES:
++        if not (source / directory).is_dir():
++            raise ValueError(f"Missing game-data directory: {source / directory}")
++    for name in REQUIRED_FILES:
++        if not (source / name).is_file():
++            raise ValueError(f"Missing required game-data file: {source / name}")
++
++
++def stage(source: Path, app: Path) -> None:
++    source = source.resolve()
++    app = app.resolve()
++    validate_source(source)
++
++    destination = app / "GameData"
++    if destination.exists():
++        raise ValueError(f"Refusing to overwrite existing bundled data: {destination}")
++
++    manifest: dict[str, str] = {}
++    for directory in DIRECTORIES:
++        source_directory = source / directory
++        for source_file in sorted(path for path in source_directory.rglob("*") if path.is_file()):
++            relative = source_file.relative_to(source)
++            destination_file = destination / relative
++            destination_file.parent.mkdir(parents=True, exist_ok=True)
++            shutil.copy2(source_file, destination_file)
++            manifest[relative.as_posix()] = digest_file(destination_file)
++
++    if not manifest:
++        raise ValueError("No game data was staged")
++
++    (app / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
++    print(f"Bundled {len(manifest)} verified files in {destination}")
++
++
++def verify_ipa(ipa: Path) -> None:
++    with zipfile.ZipFile(ipa) as archive:
++        app_roots = {
++            name.split("/", 2)[1]
++            for name in archive.namelist()
++            if name.startswith("Payload/") and name.count("/") >= 2 and ".app/" in name
++        }
++        if len(app_roots) != 1:
++            raise ValueError(f"Expected one app bundle in IPA, found: {sorted(app_roots)}")
++
++        prefix = f"Payload/{next(iter(app_roots))}/"
++        manifest = json.loads(archive.read(prefix + MANIFEST_NAME))
++        if not manifest:
++            raise ValueError("Bundled game-data manifest is empty")
++
++        for name, expected in manifest.items():
++            with archive.open(prefix + "GameData/" + name) as stream:
++                actual = hashlib.file_digest(stream, "sha256").hexdigest()
++            if actual != expected:
++                raise ValueError(f"IPA game-data mismatch: {name}")
++
++    print(f"IPA verified: {len(manifest)} bundled files match the SHA-256 manifest")
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--source", type=Path)
++    parser.add_argument("--app", type=Path)
++    parser.add_argument("--verify-ipa", type=Path)
++    args = parser.parse_args()
++
++    if args.verify_ipa:
++        verify_ipa(args.verify_ipa)
++    elif args.source and args.app:
++        stage(args.source, args.app)
++    else:
++        parser.error("Use --source with --app, or --verify-ipa")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/package_ios_ipa.sh b/tools/package_ios_ipa.sh
+new file mode 100755
+index 0000000..95b9649
+--- /dev/null
++++ b/tools/package_ios_ipa.sh
+@@ -0,0 +1,107 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++BUILD_DIR="$ROOT/out/build/ios-device-release"
++STAGING_DIR="$ROOT/out/ipa-staging"
++APP_PATH="$BUILD_DIR/UnleashedRecomp/Unleashed Recompiled iOS.app"
++IPA_PATH="$ROOT/out/Unleashed-DualSense-Touch.ipa"
++JOBS="${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || printf '8')}"
++
++for tool in cmake python3 zip; do
++    if ! command -v "$tool" >/dev/null 2>&1; then
++        printf 'Required build tool is missing: %s\n' "$tool" >&2
++        exit 1
++    fi
++done
++
++if [[ -n "${GAME_DATA_ROOT:-}" ]]; then
++    mkdir -p "$ROOT/UnleashedRecompLib/private"
++    cp "$GAME_DATA_ROOT/game/default.xex" "$ROOT/UnleashedRecompLib/private/default.xex"
++    cp "$GAME_DATA_ROOT/update/default.xexp" "$ROOT/UnleashedRecompLib/private/default.xexp"
++    cp "$GAME_DATA_ROOT/game/shader.ar" "$ROOT/UnleashedRecompLib/private/shader.ar"
++fi
++
++missing=0
++for file in default.xex default.xexp shader.ar; do
++    if [[ ! -f "$ROOT/UnleashedRecompLib/private/$file" ]]; then
++        printf 'Missing private build input: %s\n' "$ROOT/UnleashedRecompLib/private/$file" >&2
++        missing=1
++    fi
++done
++
++if [[ "$missing" -ne 0 ]]; then
++    printf 'Set GAME_DATA_ROOT to the prepared iOS user-data directory or copy your own compatible files into UnleashedRecompLib/private.\n' >&2
++    exit 1
++fi
++
++cmake --preset ios-device-release -DSDL2MIXER_VORBIS=VORBISFILE
++cmake --build "$BUILD_DIR" --target UnleashedRecomp -j "$JOBS"
++
++if [[ ! -d "$APP_PATH" ]]; then
++    printf 'Expected app bundle was not produced: %s\n' "$APP_PATH" >&2
++    exit 1
++fi
++
++case "$STAGING_DIR" in
++    "$ROOT"/out/*) ;;
++    *)
++        printf 'Unsafe staging path: %s\n' "$STAGING_DIR" >&2
++        exit 1
++        ;;
++esac
++
++rm -rf -- "$STAGING_DIR"
++mkdir -p "$STAGING_DIR/Payload" "$(dirname "$IPA_PATH")"
++cp -R "$APP_PATH" "$STAGING_DIR/Payload/"
++
++STAGED_APP="$STAGING_DIR/Payload/$(basename "$APP_PATH")"
++
++if [[ "${BUNDLE_GAME_DATA:-0}" == "1" ]]; then
++    if [[ -z "${GAME_DATA_ROOT:-}" ]]; then
++        printf 'BUNDLE_GAME_DATA=1 requires GAME_DATA_ROOT.\n' >&2
++        exit 1
++    fi
++
++    python3 "$ROOT/tools/bundle_ios_game_data.py" \
++        --source "$GAME_DATA_ROOT" \
++        --app "$STAGED_APP"
++fi
++
++if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
++    if [[ -n "${MOBILEPROVISION:-}" ]]; then
++        if [[ ! -f "$MOBILEPROVISION" ]]; then
++            printf 'Provisioning profile was not found: %s\n' "$MOBILEPROVISION" >&2
++            exit 1
++        fi
++        cp "$MOBILEPROVISION" "$STAGED_APP/embedded.mobileprovision"
++    fi
++
++    if [[ -d "$STAGED_APP/Frameworks/MoltenVK.framework" ]]; then
++        codesign --force --sign "$CODESIGN_IDENTITY" "$STAGED_APP/Frameworks/MoltenVK.framework"
++    fi
++
++    codesign_args=(--force --sign "$CODESIGN_IDENTITY")
++    if [[ -n "${ENTITLEMENTS:-}" ]]; then
++        codesign_args+=(--entitlements "$ENTITLEMENTS")
++    fi
++    codesign "${codesign_args[@]}" "$STAGED_APP"
++else
++    printf 'Applying an ad-hoc signature; your sideloading tool must re-sign the IPA on import.\n' >&2
++    if [[ -d "$STAGED_APP/Frameworks/MoltenVK.framework" ]]; then
++        codesign --force --sign - --timestamp=none "$STAGED_APP/Frameworks/MoltenVK.framework"
++    fi
++    codesign --force --sign - --timestamp=none "$STAGED_APP"
++fi
++
++rm -f -- "$IPA_PATH"
++(
++    cd "$STAGING_DIR"
++    zip -qry "$IPA_PATH" Payload
++)
++
++if [[ "${BUNDLE_GAME_DATA:-0}" == "1" ]]; then
++    python3 "$ROOT/tools/bundle_ios_game_data.py" --verify-ipa "$IPA_PATH"
++fi
++
++printf '%s\n' "$IPA_PATH"

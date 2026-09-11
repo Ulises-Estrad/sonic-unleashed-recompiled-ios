@@ -1,0 +1,6 @@
+input-parts/
+release-parts/
+*.ipa
+*.tar
+__pycache__/
+*.pyc

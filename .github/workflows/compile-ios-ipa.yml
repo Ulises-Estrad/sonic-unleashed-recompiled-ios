@@ -1,0 +1,90 @@
+name: Compile unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compile-ios-ipa
+  cancel-in-progress: false
+
+jobs:
+  compile:
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      INPUT_TAG: private-build-inputs-v1
+      SOURCE_COMMIT: 5d5adbc7e6953990be3184e8614787d93940b713
+      SOURCE_REPOSITORY: https://github.com/Markos-Th09/UnleashedRecomp.git
+      IPA_NAME: Unleashed-DualSense-Touch-Compiled.ipa
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out private build repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Download and verify private build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/private-inputs" "$RUNNER_TEMP/userdata/game" "$RUNNER_TEMP/userdata/update"
+          gh release download "$INPUT_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'default.xex' \
+            --pattern 'default.xexp' \
+            --pattern 'shader.ar' \
+            --pattern 'private-build-inputs.sha256' \
+            --dir "$RUNNER_TEMP/private-inputs"
+          cd "$RUNNER_TEMP/private-inputs"
+          shasum -a 256 -c private-build-inputs.sha256
+          cp default.xex "$RUNNER_TEMP/userdata/game/default.xex"
+          cp default.xexp "$RUNNER_TEMP/userdata/update/default.xexp"
+          cp shader.ar "$RUNNER_TEMP/userdata/game/shader.ar"
+
+      - name: Clone pinned iOS port and apply touch patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --recurse-submodules --branch ios "$SOURCE_REPOSITORY" "$RUNNER_TEMP/UnleashedRecomp"
+          cd "$RUNNER_TEMP/UnleashedRecomp"
+          git checkout "$SOURCE_COMMIT"
+          git submodule update --init --recursive
+          git apply --check "$GITHUB_WORKSPACE/patches/UnleashedRecomp-iOS-DualSense-Touch.patch"
+          git apply "$GITHUB_WORKSPACE/patches/UnleashedRecomp-iOS-DualSense-Touch.patch"
+
+      - name: Compile and verify unsigned device IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/UnleashedRecomp"
+          GAME_DATA_ROOT="$RUNNER_TEMP/userdata" \
+          JOBS="$(sysctl -n hw.logicalcpu)" \
+            ./tools/package_ios_ipa.sh
+          test -s out/Unleashed-DualSense-Touch.ipa
+          unzip -tq out/Unleashed-DualSense-Touch.ipa
+          mv out/Unleashed-DualSense-Touch.ipa "out/$IPA_NAME"
+          shasum -a 256 "out/$IPA_NAME" > "out/$IPA_NAME.sha256"
+
+      - name: Publish compiled IPA for local data injection
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="compiled-ios-${GITHUB_RUN_NUMBER}"
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Compiled unsigned arm64 iOS app with DualSense-style touch controls
+          and bundled-data support. This intermediate IPA does not contain the
+          full game data. The owner's local packaging step injects that data,
+          verifies the result, and publishes the split self-contained IPA.
+          NOTES
+          gh release create "$RELEASE_TAG" \
+            "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME" \
+            "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Compiled iOS IPA for local data injection" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"

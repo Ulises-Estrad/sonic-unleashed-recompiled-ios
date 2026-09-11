@@ -178,6 +178,90 @@ index e34d7e1..3f37fcb 100644
  #if TARGET_OS_IOS
      if (!apple::SupportsBCTextures()) {
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_iOS_UnsupportedGPU_BCTextures").c_str(), GameWindow::s_pWindow);
+diff --git a/UnleashedRecomp/platform/ios/nfd_stub.cpp b/UnleashedRecomp/platform/ios/nfd_stub.cpp
+new file mode 100644
+index 0000000..736b084
+--- /dev/null
++++ b/UnleashedRecomp/platform/ios/nfd_stub.cpp
+@@ -0,0 +1,78 @@
++#include <nfd.h>
++
++namespace
++{
++constexpr const char *UnsupportedMessage =
++    "Native file pickers are unavailable in the bundled-data iOS build.";
++}
++
++extern "C"
++{
++nfdresult_t NFD_Init(void)
++{
++    return NFD_OKAY;
++}
++
++void NFD_Quit(void)
++{
++}
++
++const char *NFD_GetError(void)
++{
++    return UnsupportedMessage;
++}
++
++nfdresult_t NFD_OpenDialogMultipleN(const nfdpathset_t **outPaths,
++                                    const nfdnfilteritem_t *,
++                                    nfdfiltersize_t,
++                                    const nfdnchar_t *)
++{
++    if (outPaths != nullptr)
++    {
++        *outPaths = nullptr;
++    }
++
++    return NFD_ERROR;
++}
++
++nfdresult_t NFD_PickFolderMultipleN(const nfdpathset_t **outPaths,
++                                    const nfdnchar_t *)
++{
++    if (outPaths != nullptr)
++    {
++        *outPaths = nullptr;
++    }
++
++    return NFD_ERROR;
++}
++
++nfdresult_t NFD_PathSet_GetCount(const nfdpathset_t *, nfdpathsetsize_t *count)
++{
++    if (count != nullptr)
++    {
++        *count = 0;
++    }
++
++    return NFD_ERROR;
++}
++
++nfdresult_t NFD_PathSet_GetPathN(const nfdpathset_t *,
++                                 nfdpathsetsize_t,
++                                 nfdnchar_t **outPath)
++{
++    if (outPath != nullptr)
++    {
++        *outPath = nullptr;
++    }
++
++    return NFD_ERROR;
++}
++
++void NFD_PathSet_FreePathN(const nfdnchar_t *)
++{
++}
++
++void NFD_PathSet_Free(const nfdpathset_t *)
++{
++}
++}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 index 817db38..5f90b2d 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
@@ -959,6 +1043,33 @@ index ecb3e04..b6c2d2f 100644
  
  inline std::filesystem::path GetSavePath(bool checkForMods)
  {
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+index d5c0858..78375f2 100644
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -24,7 +24,21 @@ if (WIN32)
+ endif()
+ 
+ add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/msdf-atlas-gen")
+-add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/nativefiledialog-extended")
++if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    # nativefiledialog-extended treats every Apple target as macOS and links
++    # AppKit, which is unavailable in the iPhoneOS SDK. The installer picker is
++    # not used by a bundled-data iOS build, so provide a small API-compatible
++    # stub instead.
++    add_library(nfd STATIC
++        "${CMAKE_SOURCE_DIR}/UnleashedRecomp/platform/ios/nfd_stub.cpp"
++    )
++    target_include_directories(nfd PUBLIC
++        "${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/nativefiledialog-extended/src/include"
++    )
++    add_library(nfd::nfd ALIAS nfd)
++else()
++    add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/nativefiledialog-extended")
++endif()
+ add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/o1heap")
+ add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL")
+ add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL_mixer")
 diff --git a/tools/bundle_ios_game_data.py b/tools/bundle_ios_game_data.py
 new file mode 100644
 index 0000000..f35de67

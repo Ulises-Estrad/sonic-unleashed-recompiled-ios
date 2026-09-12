@@ -51,6 +51,10 @@ SIDELOADLY_SOUND_FILES = {
     "bgm_stg_egb.csb",
 }
 EGGMANLAND_SUPPORT_ARCHIVES = {
+    # ArchiveTree.xml explicitly appends both to Act_EggmanLand. These contain
+    # shared player-switch metadata even when the night route is skipped.
+    "ActD_EggmanLand",
+    "ActN_EggmanLand",
     # The day-only mod skips Werehog sections, but its Stage.stg still names
     # EggmanLand_Evil in SwitchPlayer. Retaining this small dependency chain
     # prevents the stage loader from failing before the skip QTEs can run.
@@ -133,6 +137,9 @@ def root_archive_name(filename: str) -> str | None:
 def keep_sideloadly_root_file(path: Path, archives: set[str]) -> bool:
     archive = root_archive_name(path.name)
     if archive is None:
+        return True
+
+    if archive in EGGMANLAND_SUPPORT_ARCHIVES:
         return True
 
     # Keep only the selected daytime members from the large stage family.

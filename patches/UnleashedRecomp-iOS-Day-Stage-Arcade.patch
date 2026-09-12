@@ -1,5 +1,5 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..98153a0 100644
+index 6f3a2e7..5340eb3 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
 @@ -1,5 +1,11 @@
@@ -14,7 +14,23 @@ index 6f3a2e7..98153a0 100644
  if(WIN32)
      option(UNLEASHED_RECOMP_D3D12 "Add D3D12 support for rendering" ON)
  endif()
-@@ -187,6 +193,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
+@@ -158,6 +164,7 @@ set(UNLEASHED_RECOMP_HID_CXX_SOURCES
+ 
+ set(UNLEASHED_RECOMP_PATCHES_CXX_SOURCES
+     "patches/aspect_ratio_patches.cpp"
++    "patches/arcade_selector_patches.cpp"
+     "patches/audio_patches.cpp"
+     "patches/camera_patches.cpp"
+     "patches/CGameModeStageTitle_patches.cpp"
+@@ -177,6 +184,7 @@ set(UNLEASHED_RECOMP_PATCHES_CXX_SOURCES
+ 
+ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
+     "ui/achievement_menu.cpp"
++    "ui/arcade_menu.cpp"
+     "ui/achievement_overlay.cpp"
+     "ui/black_bar.cpp"
+     "ui/button_guide.cpp"
+@@ -187,6 +195,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
      "ui/message_window.cpp"
      "ui/options_menu.cpp"
      "ui/options_menu_thumbnails.cpp"
@@ -22,7 +38,7 @@ index 6f3a2e7..98153a0 100644
      "ui/tv_static.cpp"
  )
  
-@@ -332,15 +339,18 @@ elseif(APPLE)
+@@ -332,15 +341,18 @@ elseif(APPLE)
          OUTPUT_VAR MACOS_BUNDLE_VERSION
      )
  
@@ -44,7 +60,7 @@ index 6f3a2e7..98153a0 100644
              MACOSX_BUNDLE_BUNDLE_VERSION ${IOS_BUNDLE_VERSION}
              MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
              XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-@@ -485,10 +495,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+@@ -485,10 +497,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -67,6 +83,12 @@ index 6f3a2e7..98153a0 100644
  target_link_libraries(UnleashedRecomp PRIVATE ${UNLEASHED_RECOMP_LINK_LIBS})
  
  target_include_directories(UnleashedRecomp PRIVATE
+diff --git a/UnleashedRecomp/api b/UnleashedRecomp/api
+--- a/UnleashedRecomp/api
++++ b/UnleashedRecomp/api
+@@ -1 +1 @@
+-Subproject commit f299dd8cf272a0110c91e54e2b6e308a2d897966
++Subproject commit f299dd8cf272a0110c91e54e2b6e308a2d897966-dirty
 diff --git a/UnleashedRecomp/app.cpp b/UnleashedRecomp/app.cpp
 index b298ebc..8100cff 100644
 --- a/UnleashedRecomp/app.cpp
@@ -183,10 +205,18 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..8ef7b29 100644
+index 0205276..3e46b15 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -28,6 +28,7 @@
+@@ -19,6 +19,7 @@
+ #include <shader/shader_cache.h>
+ #include <SWA.h>
+ #include <ui/achievement_menu.h>
++#include <ui/arcade_menu.h>
+ #include <ui/achievement_overlay.h>
+ #include <ui/button_guide.h>
+ #include <ui/fader.h>
+@@ -28,6 +29,7 @@
  #include <ui/options_menu.h>
  #include <ui/game_window.h>
  #include <ui/black_bar.h>
@@ -194,7 +224,7 @@ index 0205276..8ef7b29 100644
  #include <patches/aspect_ratio_patches.h>
  #include <user/config.h>
  #include <sdl_listener.h>
-@@ -430,6 +431,24 @@ static Mutex g_pipelineCacheMutex;
+@@ -430,6 +432,24 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -219,7 +249,7 @@ index 0205276..8ef7b29 100644
  enum class PipelineTaskType
  {
      Null,
-@@ -1428,6 +1447,7 @@ static void CreateImGuiBackend()
+@@ -1428,6 +1448,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -227,7 +257,15 @@ index 0205276..8ef7b29 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2676,6 +2696,8 @@ static void DrawImGui()
+@@ -2668,6 +2689,7 @@ static void DrawImGui()
+     ImGui::End();
+ #endif
+ 
++    ArcadeMenu::Draw();
+     AchievementMenu::Draw();
+     OptionsMenu::Draw();
+     AchievementOverlay::Draw();
+@@ -2676,6 +2698,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -236,7 +274,7 @@ index 0205276..8ef7b29 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -2882,8 +2904,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2906,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -295,7 +333,7 @@ index 0205276..8ef7b29 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2971,6 +3043,9 @@ void Video::Present()
+@@ -2971,6 +3045,9 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
@@ -305,7 +343,7 @@ index 0205276..8ef7b29 100644
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3167,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3169,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -315,7 +353,7 @@ index 0205276..8ef7b29 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -6398,6 +6476,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6398,6 +6478,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
  #endif
  )
  {
@@ -326,7 +364,7 @@ index 0205276..8ef7b29 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6491,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6409,6 +6493,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      cmd.addPipeline.hash = pipelineHash;
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
@@ -337,7 +375,7 @@ index 0205276..8ef7b29 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6600,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6514,6 +6602,9 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.token = tokenPair.sharedToken;
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
@@ -347,7 +385,7 @@ index 0205276..8ef7b29 100644
  #endif
              g_pipelineStateQueue.enqueue(queueItem);
          }
-@@ -7086,27 +7175,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7177,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -405,7 +443,7 @@ index 0205276..8ef7b29 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7392,9 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7394,9 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -415,7 +453,7 @@ index 0205276..8ef7b29 100644
  
      while (true)
      {
-@@ -7291,6 +7413,12 @@ static void PipelineTaskConsumerThread()
+@@ -7291,6 +7415,12 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -428,7 +466,7 @@ index 0205276..8ef7b29 100644
  
          for (auto& [type, databaseData] : localPipelineTaskQueue)
          {
-@@ -7358,6 +7486,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7488,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -450,7 +488,7 @@ index 0205276..8ef7b29 100644
                  }
  
                  break;
-@@ -7515,6 +7658,17 @@ static void PipelineTaskConsumerThread()
+@@ -7515,6 +7660,17 @@ static void PipelineTaskConsumerThread()
              }
          }
  
@@ -606,10 +644,10 @@ index d61131f..1101524 100644
      bool IsInputAllowed();
      bool IsInputDeviceController();
 diff --git a/UnleashedRecomp/kernel/io/file_system.cpp b/UnleashedRecomp/kernel/io/file_system.cpp
-index a765d12..02dcacd 100644
+index a765d12..b1713ce 100644
 --- a/UnleashedRecomp/kernel/io/file_system.cpp
 +++ b/UnleashedRecomp/kernel/io/file_system.cpp
-@@ -8,6 +8,50 @@
+@@ -8,6 +8,51 @@
  #include <user/config.h>
  #include <stdafx.h>
  
@@ -628,7 +666,8 @@ index a765d12..02dcacd 100644
 +            requestedPath[splitMarker + 4] >= '0' && requestedPath[splitMarker + 4] <= '9' &&
 +            requestedPath[splitMarker + 5] >= '0' && requestedPath[splitMarker + 5] <= '9';
 +        if (!isArchiveSplit && !requestedPath.ends_with(".ar") &&
-+            !requestedPath.ends_with(".arl") && !requestedPath.ends_with(".sfd"))
++            !requestedPath.ends_with(".arl") && !requestedPath.ends_with(".sfd") &&
++            !requestedPath.ends_with(".xml"))
 +            return;
 +    }
 +
@@ -638,7 +677,7 @@ index a765d12..02dcacd 100644
 +    {
 +        std::lock_guard lock(logMutex);
 +        auto& paths = succeeded ? openedArchivePaths : failedPaths;
-+        if (paths.size() >= 64 || !paths.emplace(requestedPath).second)
++        if (paths.size() >= 256 || !paths.emplace(requestedPath).second)
 +            return;
 +    }
 +
@@ -660,7 +699,18 @@ index a765d12..02dcacd 100644
  struct FileHandle : KernelObject
  {
      std::fstream stream;
-@@ -107,14 +151,26 @@ FileHandle* XCreateFileA
+@@ -71,8 +116,8 @@ struct FindHandle : KernelObject
+             lpFindFileData->dwFileAttributes = ByteSwap(FILE_ATTRIBUTE_NORMAL);
+ 
+         strncpy(lpFindFileData->cFileName, (const char *)(iterator->first.c_str()), sizeof(lpFindFileData->cFileName));
+-        lpFindFileData->nFileSizeLow = ByteSwap(uint32_t(iterator->second.first >> 32U));
+-        lpFindFileData->nFileSizeHigh = ByteSwap(uint32_t(iterator->second.first));
++        lpFindFileData->nFileSizeLow = ByteSwap(uint32_t(iterator->second.first));
++        lpFindFileData->nFileSizeHigh = ByteSwap(uint32_t(iterator->second.first >> 32U));
+         lpFindFileData->ftCreationTime = {};
+         lpFindFileData->ftLastAccessTime = {};
+         lpFindFileData->ftLastWriteTime = {};
+@@ -107,14 +152,26 @@ FileHandle* XCreateFileA
      }
  
      fileStream.open(filePath, fileOpenMode);
@@ -925,23 +975,31 @@ index 8a284b9..84292cf 100644
      #else
          if (func)
 diff --git a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
-index 61ac40d..7ce5844 100644
+index 61ac40d..f45adc4 100644
 --- a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
 +++ b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
-@@ -15,6 +15,12 @@ static bool g_installMessageOpen = false;
+@@ -6,6 +6,7 @@
+ #include <ui/fader.h>
+ #include <ui/message_window.h>
+ #include <ui/options_menu.h>
++#include <ui/arcade_menu.h>
+ #include <user/achievement_manager.h>
+ #include <user/paths.h>
+ #include <app.h>
+@@ -15,6 +16,12 @@ static bool g_installMessageOpen = false;
  static bool g_installMessageFaderBegun = false;
  static int g_installMessageResult = -1;
  
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
 +static SWA::CTitleStateMenu* g_arcadeTitleMenu = nullptr;
-+static uint32_t g_arcadeTitleMenuFrames = 0;
++static uint32_t g_arcadeTitleFrames = 0;
 +static bool g_arcadeTitleMenuAccepted = false;
 +#endif
 +
  #if TARGET_OS_IOS
  #include <CoreFoundation/CoreFoundation.h>
  
-@@ -73,7 +79,7 @@ PPC_FUNC(sub_825882B8)
+@@ -73,7 +80,7 @@ PPC_FUNC(sub_825882B8)
      auto pGameDocument = SWA::CGameDocument::GetInstance();
  
      auto pInputState = SWA::CInputState::GetInstance();
@@ -950,40 +1008,56 @@ index 61ac40d..7ce5844 100644
      auto isAccepted = pPadState.IsTapped(SWA::eKeyState_A) || pPadState.IsTapped(SWA::eKeyState_Start);
  
      auto pContext = pTitleStateMenu->GetContextBase<SWA::CTitleStateMenu::CTitleStateMenuContext>();
-@@ -81,6 +87,39 @@ PPC_FUNC(sub_825882B8)
+@@ -81,6 +88,55 @@ PPC_FUNC(sub_825882B8)
      auto isOptionsIndex = pContext->m_pTitleMenu->m_CursorIndex == 2;
      auto isInstallIndex = pContext->m_pTitleMenu->m_CursorIndex == 3;
  
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    // Keep the normal title screen, but collapse the menu after it to one
-+    // automatic Continue action. StartPlay/Opening are redirected by the
-+    // bundled arcade data overlay, so this enters the stage selector without
-+    // exposing story, town or world-map choices.
-+    if (g_arcadeTitleMenu != pTitleStateMenu)
++    if (g_arcadeTitleMenu != pTitleStateMenu || ArcadeMenu::resetTitle.exchange(false))
 +    {
 +        g_arcadeTitleMenu = pTitleStateMenu;
-+        g_arcadeTitleMenuFrames = 0;
 +        g_arcadeTitleMenuAccepted = false;
++        g_arcadeTitleFrames = 0;
++        ArcadeMenu::selection.store(0);
 +    }
 +
-+    if (!g_arcadeTitleMenuAccepted && !App::s_isSaveDataCorrupt)
++    if (!g_arcadeTitleMenuAccepted)
 +    {
-+        pContext->m_pTitleMenu->m_CursorIndex = 1;
-+        isNewGameIndex = false;
-+        isOptionsIndex = false;
-+        isInstallIndex = false;
-+
-+        // Allow the retail menu scene to finish its entrance transition before
-+        // synthesising the one-frame accept tap.
-+        if (++g_arcadeTitleMenuFrames >= 12)
++        ArcadeMenu::visible.store(true);
++        if (OptionsMenu::s_isVisible)
 +        {
-+            const uint32_t tapped = pPadState.TappedState;
-+            pPadState.TappedState = tapped | SWA::eKeyState_A;
-+            __imp__sub_825882B8(ctx, base);
-+            pPadState.TappedState = tapped;
-+            g_arcadeTitleMenuAccepted = true;
++            if (OptionsMenu::CanClose() && pPadState.IsTapped(SWA::eKeyState_B))
++                OptionsMenu::Close();
 +            return;
 +        }
++        if (pPadState.IsTapped(SWA::eKeyState_DpadUp) ||
++            pPadState.IsTapped(SWA::eKeyState_DpadDown) ||
++            pPadState.IsTapped(SWA::eKeyState_LeftStickUp) ||
++            pPadState.IsTapped(SWA::eKeyState_LeftStickDown))
++            ArcadeMenu::selection.store(1 - ArcadeMenu::selection.load());
++
++        int choice = ArcadeMenu::requestedChoice.exchange(-1);
++        if (++g_arcadeTitleFrames < 12)
++            choice = -1;
++        else if (isAccepted)
++            choice = ArcadeMenu::selection.load();
++        if (choice == 1)
++        {
++            OptionsMenu::Open();
++            return;
++        }
++        const SWA::SPadState savedPad = pPadState;
++        pPadState = {};
++        pContext->m_pTitleMenu->m_CursorIndex = 1;
++        if (choice == 0)
++        {
++            pPadState.TappedState = SWA::eKeyState_A;
++            ArcadeMenu::visible.store(false);
++            g_arcadeTitleMenuAccepted = true;
++        }
++        __imp__sub_825882B8(ctx, base);
++        pPadState = savedPad;
++        return;
 +    }
 +#endif
 +
@@ -1284,7 +1358,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..d686b02 100644
+index d9130f4..4fefb98 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1292,7 +1366,7 @@ index d9130f4..d686b02 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=5
++VERSION_REVISION=6
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -2509,32 +2583,191 @@ index 0000000..3a66070
 +fi
 +
 +printf '%s\n' "$IPA_PATH"
-diff --git a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
-index 59e2d07..b9dfd5e 100644
---- a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
-+++ b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
-@@ -12,11 +12,15 @@ namespace SWA
-         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcSpeedGauge;
-         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcRingEnergyGauge;
-         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcGaugeFrame;
--        SWA_INSERT_PADDING(0x28);
-+        Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcExpCount;
-+        SWA_INSERT_PADDING(0x20);
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcScoreCount;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount2;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount3;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcPlayerCount;
-     };
+diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
+new file mode 100644
+index 0000000..c583b43
+--- /dev/null
++++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
+@@ -0,0 +1,103 @@
++#include <api/SWA.h>
++#include <kernel/function.h>
++#include <os/logger.h>
++#include <ui/options_menu.h>
++#include <ui/arcade_menu.h>
 +
-+    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcExpCount, 0x100);
-+    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
- }
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++namespace
++{
++    uint32_t selectorOwner = 0;
++    uint32_t countryVector = 0;
++    uint32_t countryIndex = 0;
++
++    // Retail Select.xml parser: categories are shared_ptr entries (8 bytes)
++    // in a vector at +8/+12. Verified from 8254EA58 and 82550548.
++    void ShowCountry(PPCContext& ctx, uint8_t* base, uint32_t owner)
++    {
++        const uint32_t country = PPC_LOAD_U32(countryVector + countryIndex * 8);
++        const uint32_t display = PPC_LOAD_U32(owner + 0x238);
++        if (!country || !display)
++            return;
++        const PPCContext saved = ctx;
++        PPC_STORE_U32(owner + 0x22C, country);
++        PPC_STORE_U32(owner + 0x230, 1);
++        ctx.r3.u32 = display + 0xC;
++        sub_822CE648(ctx, base); // Clear the previous displayed rows.
++        ctx.r3.u32 = owner;
++        ctx.r4.u32 = country;
++        sub_8254EA58(ctx, base); // Rebuild from this country's stage vector.
++        ctx = saved;
++        LOGFN("Arcade selector: country index {}", countryIndex);
++    }
++}
++#endif
++
++PPC_FUNC_IMPL(__imp__sub_825502C8);
++PPC_FUNC(sub_825502C8)
++{
++    const uint32_t owner = ctx.r3.u32;
++    __imp__sub_825502C8(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    selectorOwner = 0;
++    ArcadeMenu::resetTitle.store(true);
++    const uint32_t root = PPC_LOAD_U32(owner + 0x22C);
++    if (!root)
++        return;
++    const uint32_t begin = PPC_LOAD_U32(root + 8);
++    const uint32_t end = PPC_LOAD_U32(root + 12);
++    if (!begin || end < begin || end - begin != 9 * 8)
++    {
++        LOGFN("Arcade selector: expected nine countries; XML override not active");
++        return;
++    }
++    selectorOwner = owner;
++    countryVector = begin;
++    ArcadeMenu::visible.store(false);
++    ShowCountry(ctx, base, owner);
++#endif
++}
++
++PPC_FUNC_IMPL(__imp__sub_8254CEB8);
++PPC_FUNC(sub_8254CEB8)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (ctx.r3.u32 == selectorOwner)
++    {
++        auto* input = SWA::CInputState::GetInstance();
++        if (input)
++        {
++            auto& pad = const_cast<SWA::SPadState&>(input->GetPadState());
++            const SWA::SPadState saved = pad;
++            if (OptionsMenu::s_isVisible)
++            {
++                if (OptionsMenu::CanClose() && pad.IsTapped(SWA::eKeyState_B))
++                    OptionsMenu::Close();
++                pad = {};
++            }
++            else if (pad.IsTapped(SWA::eKeyState_Start))
++            {
++                OptionsMenu::Open();
++                pad = {};
++            }
++            else
++            {
++                const bool previous = pad.IsTapped(SWA::eKeyState_LeftBumper) || pad.IsTapped(SWA::eKeyState_DpadLeft);
++                const bool next = pad.IsTapped(SWA::eKeyState_RightBumper) || pad.IsTapped(SWA::eKeyState_DpadRight);
++                if (previous || next)
++                {
++                    countryIndex = (countryIndex + (previous ? 8 : 1)) % 9;
++                    ShowCountry(ctx, base, selectorOwner);
++                    pad = {};
++                }
++                // Country browsing never returns to the debug category tree.
++                pad.TappedState = uint32_t(pad.TappedState) & ~uint32_t(SWA::eKeyState_B);
++            }
++            __imp__sub_8254CEB8(ctx, base);
++            pad = saved;
++            return;
++        }
++    }
++#endif
++    __imp__sub_8254CEB8(ctx, base);
++}
+diff --git a/UnleashedRecomp/ui/arcade_menu.cpp b/UnleashedRecomp/ui/arcade_menu.cpp
+new file mode 100644
+index 0000000..e818a5f
+--- /dev/null
++++ b/UnleashedRecomp/ui/arcade_menu.cpp
+@@ -0,0 +1,33 @@
++#include "arcade_menu.h"
++#include <imgui.h>
++
++void ArcadeMenu::Draw()
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (!visible.load())
++        return;
++    const ImVec2 size = ImGui::GetIO().DisplaySize;
++    const float scale = size.y / 720.0f;
++    ImGui::SetNextWindowPos(ImVec2(0, 0));
++    ImGui::SetNextWindowSize(size);
++    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.015f, 0.04f, 0.09f, 1));
++    ImGui::Begin("Sonic Unleashed Arcade", nullptr,
++        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
++        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
++    ImGui::SetWindowFontScale(2.0f * scale);
++    ImGui::SetCursorPos(ImVec2(size.x * 0.35f, size.y * 0.18f));
++    ImGui::TextUnformatted("SONIC UNLEASHED");
++    const char* labels[] = {"Stage Select", "Options"};
++    for (int i = 0; i < 2; ++i)
++    {
++        ImGui::SetCursorPos(ImVec2(size.x * 0.35f, size.y * 0.36f + i * 80 * scale));
++        ImGui::PushStyleColor(ImGuiCol_Button, selection.load() == i
++            ? ImVec4(0.12f, 0.48f, 0.7f, 1) : ImVec4(0.04f, 0.12f, 0.2f, 1));
++        if (ImGui::Button(labels[i], ImVec2(size.x * 0.30f, 64 * scale)))
++            requestedChoice.store(i);
++        ImGui::PopStyleColor();
++    }
++    ImGui::End();
++    ImGui::PopStyleColor();
++#endif
++}
+diff --git a/UnleashedRecomp/ui/arcade_menu.h b/UnleashedRecomp/ui/arcade_menu.h
+new file mode 100644
+index 0000000..087e935
+--- /dev/null
++++ b/UnleashedRecomp/ui/arcade_menu.h
+@@ -0,0 +1,11 @@
++#pragma once
++#include <atomic>
++
++namespace ArcadeMenu
++{
++    inline std::atomic<bool> visible{false};
++    inline std::atomic<int> selection{0};
++    inline std::atomic<int> requestedChoice{-1};
++    inline std::atomic<bool> resetTitle{false};
++    void Draw();
++}
 diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
-index 2abe67c..2a914ad 100644
+index 2abe67c..e152038 100644
 --- a/thirdparty/plume/plume_metal.cpp
 +++ b/thirdparty/plume/plume_metal.cpp
-@@ -3796,7 +3796,14 @@ namespace plume {
+@@ -1619,6 +1619,14 @@ namespace plume {
+ 
+         if (error != nullptr) {
+             fprintf(stderr, "MTLDevice newRenderPipelineState: failed with error %s.\n", error->localizedDescription()->utf8String());
++            fprintf(stderr, "METAL-PIPELINE vertex=%s\n",
++                metalShader->debugName ? metalShader->debugName->utf8String() : "unnamed");
++            for (uint32_t i = 0; i < desc.inputElementsCount; ++i) {
++                const RenderInputElement &element = desc.inputElements[i];
++                fprintf(stderr, "METAL-INPUT location=%u semantic=%s%u format=%u slot=%u offset=%u\n",
++                    element.location, element.semanticName, element.semanticIndex,
++                    unsigned(element.format), element.slotIndex, element.alignedByteOffset);
++            }
+             return;
+         }
+ 
+@@ -3796,7 +3804,14 @@ namespace plume {
  
          const std::string deviceName(mtl->name()->utf8String());
          description.name = deviceName;

@@ -270,6 +270,16 @@ def prepare(
 
     output.mkdir(parents=True)
     counters = {"files": 0, "bytes": 0, "hardlink": 0, "copy": 0}
+    replaced_families = {
+        (p.parent.relative_to(arcade_overlay), p.name.startswith("#"), root_archive_name(p.name))
+        for p in arcade_overlay.rglob("*.arl")
+        if p.relative_to(arcade_overlay).parts[0] in {"game", "dlc"}
+    }
+
+    def not_replaced(path: Path) -> bool:
+        relative = path.relative_to(data_root)
+        return (relative.parent, path.name.startswith("#"), root_archive_name(path.name)) not in replaced_families
+
     try:
         for directory in FULL_DIRECTORIES:
             source = data_root / directory
@@ -280,10 +290,10 @@ def prepare(
                 if directory == "game"
                 else source.rglob("*")
             )
-            transfer_files(files, source, output / directory, mode, counters)
+            transfer_files((p for p in files if not_replaced(p)), source, output / directory, mode, counters)
 
         dlc_files = selected_dlc_files(data_root, catalog, profile)
-        transfer_files(dlc_files, data_root, output, mode, counters)
+        transfer_files((p for p in dlc_files if not_replaced(p)), data_root, output, mode, counters)
         transfer_files(
             (save_root / filename for filename in REQUIRED_SAVE_FILES),
             save_root,

@@ -11,21 +11,24 @@ commit `5d5adbc7e6953990be3184e8614787d93940b713` on its `ios` branch.
 
 ## Download
 
-**Runtime testing is incomplete.** Version 1.0.4 reaches the intro screens
-but remains at Now Loading on the owner's iPhone. The arcade flow and
-background/resume behavior are not yet verified in gameplay. Version 1.0.5
-adds persistent loading diagnostics; it is not a confirmed loading fix.
+**Runtime testing is incomplete.** The owner confirmed that 1.0.5 DataFix1
+passes the loading screen and loads day stages. Apotos Act 1 has transparent
+scenery, Eggmanland fails to load, and the original menu remains visible.
+Version 1.0.6 is being built with a two-choice arcade menu, direct country
+browsing, corrected file enumeration sizes, and Eggmanland dependencies.
+Its full data package will bake XML edits into verified copies of the archives.
+These changes still require device testing; the Apotos rendering issue is open.
 Never install a `compiled-ios-*` release: those are code-only intermediates.
 
-Current full diagnostic IPA (private prerelease):
+Older diagnostic IPA (does not contain the DataFix1 archive repair):
 [`ios-loading-diagnostics-1.0.5`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/ios-loading-diagnostics-1.0.5)
 
 - File: `Sonic-Unleashed-1.0.5-Diagnostics.ipa`
 - Size: `1,752,853,606` bytes (1.632 GiB)
 - SHA-256: `55516d3a4be494acfcdcd31109ea8979d1737b4a2b7f68ee3095a235cbff82f7`
 
-Download that one IPA and drag it directly into Sideloadly. There are no
-numbered parts and no reconstruction step.
+Use the specifically identified full IPA for each device test. Code-only
+builds and older diagnostic packages are not substitutes for the full package.
 
 Install over the existing app rather than deleting it. This diagnostic build
 saves `Sonic-Unleashed-diagnostic.log` and `Sonic-Unleashed-stderr.log` in the

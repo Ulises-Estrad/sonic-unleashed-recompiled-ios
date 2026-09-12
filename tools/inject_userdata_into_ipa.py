@@ -48,7 +48,12 @@ def copy_zip_entry(source: zipfile.ZipFile, destination: zipfile.ZipFile, info: 
     if info.is_dir():
         destination.writestr(copied_info, b"")
         return
-    with source.open(info, "r") as input_stream, destination.open(copied_info, "w", force_zip64=True) as output_stream:
+    needs_zip64 = info.file_size >= zipfile.ZIP64_LIMIT
+    with source.open(info, "r") as input_stream, destination.open(
+        copied_info,
+        "w",
+        force_zip64=needs_zip64,
+    ) as output_stream:
         shutil.copyfileobj(input_stream, output_stream, BUFFER_SIZE)
 
 
@@ -62,7 +67,12 @@ def add_data_file(
     info.compress_type = zipfile.ZIP_DEFLATED
     info._compresslevel = compression_level
     digest = hashlib.sha256()
-    with source_file.open("rb") as input_stream, archive.open(info, "w", force_zip64=True) as output_stream:
+    needs_zip64 = info.file_size >= zipfile.ZIP64_LIMIT
+    with source_file.open("rb") as input_stream, archive.open(
+        info,
+        "w",
+        force_zip64=needs_zip64,
+    ) as output_stream:
         while block := input_stream.read(BUFFER_SIZE):
             output_stream.write(block)
             digest.update(block)

@@ -14,12 +14,18 @@ commit `5d5adbc7e6953990be3184e8614787d93940b713` on its `ios` branch.
 Private release:
 [`day-stage-arcade-v1`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/day-stage-arcade-v1)
 
-- File: `Unleashed-Day-Stage-Arcade.ipa`
-- Size: `1,752,629,894` bytes (1.632 GiB)
-- SHA-256: `c469ab761632f53a972a59ab1e99d944734a04d691caede3afa588f10dc9e88d`
+- File: `Sonic-Unleashed.ipa`
+- Size: `1,752,843,976` bytes (1.632 GiB)
+- SHA-256: `a83268f836593cb13e8d7b57d22283a7e7b12f3fa89c9166c55c40776bf3aa4e`
 
 Download that one IPA and drag it directly into Sideloadly. There are no
 numbered parts and no reconstruction step.
+
+The iOS bundle, executable, and Home Screen label are all named `Sonic
+Unleashed`. The package includes the project's Sonic artwork in every required
+iPhone and iPad app-icon size. Its Metal startup path classifies the iPhone GPU
+as integrated without calling the macOS-only `MTLDevice.location` selector that
+caused the earlier build to abort immediately after launch.
 
 ## Arcade edition
 
@@ -114,9 +120,9 @@ python .\tools\prepare_arcade_data.py `
   --profile sideloadly
 
 python .\tools\inject_userdata_into_ipa.py `
-  --compiled-ipa ".\Unleashed-Day-Stage-Arcade-Compiled.ipa" `
+  --compiled-ipa ".\Sonic-Unleashed-Compiled.ipa" `
   --data-root "C:\path\to\prepared-arcade-data" `
-  --output ".\Unleashed-Day-Stage-Arcade.ipa"
+  --output ".\Sonic-Unleashed.ipa"
 ```
 
 ## Private data policy

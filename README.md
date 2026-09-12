@@ -17,6 +17,9 @@ Sideloadly-friendly packaging.
 GitHub requires each release asset to be smaller than 2 GiB. The final IPA is
 therefore stored as numbered parts with a SHA-256 manifest.
 
+Private release:
+[`ios-self-contained-1`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/ios-self-contained-1)
+
 1. Download every `Unleashed-DualSense-Touch.ipa.partNNN` file from the latest
    release.
 2. Download `Unleashed-DualSense-Touch.ipa.manifest.json` and `join-ipa.ps1`
@@ -31,6 +34,12 @@ therefore stored as numbered parts with a SHA-256 manifest.
 
 The join script verifies each part and the complete IPA before reporting
 success.
+
+Expected reconstructed file:
+
+- Name: `Unleashed-DualSense-Touch.ipa`
+- Size: `9,166,196,211` bytes
+- SHA-256: `2910c2ee1655df98719698e260491fd053ed9589ed7c81026d47663db12b27f3`
 
 ## Why GitHub uses a Mac runner
 

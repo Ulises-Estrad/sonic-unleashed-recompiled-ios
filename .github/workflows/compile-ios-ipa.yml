@@ -84,7 +84,17 @@ jobs:
               info = plistlib.loads(archive.read(prefix + "Info.plist"))
               assert info["CFBundleDisplayName"] == "Sonic Unleashed"
               assert info["CFBundleExecutable"] == "Sonic Unleashed"
+              assert info["UILaunchScreen"] == {}
+              assert info["UIStatusBarHidden"] is True
+              assert info["UIViewControllerBasedStatusBarAppearance"] is False
               assert prefix + "Sonic Unleashed" in archive.namelist()
+              executable = archive.read(prefix + "Sonic Unleashed")
+              markers = (
+                  b"iOS startup: entering SDL event pump.",
+                  b"SYNC-CS-BACKEND condition-variable-ios",
+              )
+              missing_markers = [marker.decode() for marker in markers if marker not in executable]
+              assert not missing_markers, f"Missing iOS runtime fixes: {missing_markers}"
               missing = sorted(prefix + icon for icon in icons if prefix + icon not in archive.namelist())
               assert not missing, f"Missing app icons: {missing}"
           PY
@@ -100,8 +110,9 @@ jobs:
           Compiled unsigned arm64 iOS app for the private Sonic Unleashed
           Day-Stage Arcade edition. It includes the iPhone Metal launch fix,
           Sonic Unleashed app name and icon, title-to-selector flow, arcade
-          gameplay patches, DualSense-style touch controls, automatic
-          DualSense/touch handoff, and bundled-data support.
+          gameplay patches, native fullscreen presentation, background/resume
+          lifecycle handling, DualSense-style touch controls with Start,
+          automatic DualSense/touch handoff, and bundled-data support.
 
           This intermediate IPA intentionally contains no full game data. The
           owner's local packaging step injects the validated slim data tree and

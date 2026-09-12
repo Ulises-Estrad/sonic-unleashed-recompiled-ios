@@ -27,6 +27,12 @@ iPhone and iPad app-icon size. Its Metal startup path classifies the iPhone GPU
 as integrated without calling the macOS-only `MTLDevice.location` selector that
 caused the earlier build to abort immediately after launch.
 
+The iOS runtime uses a native fullscreen launch configuration and keeps the
+UIKit/SDL event pump on the main thread while the recompiled game runs on a
+worker. Backgrounding therefore suspends rendering cleanly, and reopening the
+still-resident app continues from where it was left. If iOS has evicted the app
+from memory, opening it performs a normal cold start.
+
 ## Arcade edition
 
 - Keeps the Sonic Unleashed title screen. Pressing Start continues directly
@@ -65,7 +71,8 @@ The authoritative catalog is [`arcade/stages.json`](arcade/stages.json):
 
 The touch layout has a left virtual stick; L1 and R1 side by side above it;
 Square, Triangle, Circle, and Cross in the PlayStation diamond; and R2 above
-the diamond's upper-right side.
+the diamond's upper-right side. A Start button sits at the bottom center and
+maps to the standard Start/Options game input.
 
 The port's existing SDL controller driver already supplies the normal
 DualSense layout, including both sticks, D-pad, face buttons, shoulders,

@@ -1,5 +1,5 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..1918a8f 100644
+index 6f3a2e7..98153a0 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
 @@ -1,5 +1,11 @@
@@ -44,11 +44,18 @@ index 6f3a2e7..1918a8f 100644
              MACOSX_BUNDLE_BUNDLE_VERSION ${IOS_BUNDLE_VERSION}
              MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
              XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-@@ -485,10 +495,15 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+@@ -485,10 +495,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-+    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS)
++    # The single merged iOS target still uses the condition-variable based
++    # synchronization backend that was originally introduced for the separate
++    # launcher target. Keep its legacy define enabled until those guards are
++    # renamed upstream.
++    target_compile_definitions(UnleashedRecomp PRIVATE
++        UNLEASHED_RECOMP_IOS
++        UNLEASHED_RECOMP_IOS_LAUNCHER
++    )
      list(PREPEND UNLEASHED_RECOMP_LINK_LIBS SDL2::SDL2main)
      list(APPEND UNLEASHED_RECOMP_LINK_LIBS "-framework UniformTypeIdentifiers")
  endif()
@@ -198,7 +205,7 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..f5ed541 100644
+index 0205276..bd01f34 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
 @@ -28,6 +28,7 @@
@@ -225,6 +232,53 @@ index 0205276..f5ed541 100644
 +    TouchControls::Draw();
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
+ 
+@@ -7086,26 +7090,46 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+     }
+ }
+ 
++#ifndef UNLEASHED_RECOMP_IOS
+ static std::thread::id g_mainThreadId = std::this_thread::get_id();
++#endif
+ 
+ // SWA::CGameModeStage::ExitLoading
+ PPC_FUNC_IMPL(__imp__sub_825369A0);
+ PPC_FUNC(sub_825369A0)
+ {
++#ifndef UNLEASHED_RECOMP_IOS
+     assert(std::this_thread::get_id() == g_mainThreadId);
++#endif
+ 
+     // Wait for pipeline compilations to finish.
+     uint32_t value;
++#ifdef UNLEASHED_RECOMP_IOS
++    bool loggedWait = false;
++#endif
+     while ((value = g_compilingPipelineTaskCount.load()) != 0)
+     {
++#ifdef UNLEASHED_RECOMP_IOS
++        if (!loggedWait)
++        {
++            LOGFN("iOS loading: waiting for {} pipeline task(s).", value);
++            loggedWait = true;
++        }
++#else
+         // Pump SDL events to prevent the OS
+         // from thinking the process is unresponsive.
+         SDL_PumpEvents();
+         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
++#endif
+ 
+         g_compilingPipelineTaskCount.wait(value);
+     }
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    if (loggedWait)
++        LOGN("iOS loading: pipeline tasks completed.");
++#endif
++
+     __imp__sub_825369A0(ctx, base);
+ }
  
 diff --git a/UnleashedRecomp/hid/driver/sdl_hid.cpp b/UnleashedRecomp/hid/driver/sdl_hid.cpp
 index 7623552..f4df262 100644
@@ -352,13 +406,17 @@ index d61131f..1101524 100644
      bool IsInputAllowed();
      bool IsInputDeviceController();
 diff --git a/UnleashedRecomp/main.cpp b/UnleashedRecomp/main.cpp
-index e34d7e1..7b97724 100644
+index e34d7e1..25a6ad5 100644
 --- a/UnleashedRecomp/main.cpp
 +++ b/UnleashedRecomp/main.cpp
-@@ -213,6 +213,12 @@ int main(int argc, char *argv[])
+@@ -213,6 +213,16 @@ int main(int argc, char *argv[])
  
      os::logger::Init();
  
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGN("iOS startup: native fullscreen, threaded guest, condition-variable waits.");
++#endif
++
 +    if (!SeedBundledSaveData())
 +        LOGN_WARNING("Unable to seed the bundled save data; existing user saves were left unchanged.");
 +
@@ -368,6 +426,70 @@ index e34d7e1..7b97724 100644
  #if TARGET_OS_IOS
      if (!apple::SupportsBCTextures()) {
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_iOS_UnsupportedGPU_BCTextures").c_str(), GameWindow::s_pWindow);
+@@ -354,6 +364,9 @@ int main(int argc, char *argv[])
+ 
+     std::filesystem::path modulePath;
+     bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGFN("iOS startup: bundled install detected={}", isGameInstalled);
++#endif
+     bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
+     if (runInstallerWizard)
+     {
+@@ -370,13 +383,22 @@ int main(int argc, char *argv[])
+     }
+ 
+     ModLoader::Init();
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGN("iOS startup: mod loader initialized.");
++#endif
+ 
+     if (!PersistentStorageManager::LoadBinary())
+         LOGFN_ERROR("Failed to load persistent storage binary... (status code {})", (int)PersistentStorageManager::BinStatus);
+ 
+     KiSystemStartup();
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGN("iOS startup: guest services initialized.");
++#endif
+ 
+     uint32_t entry = LdrLoadModule(modulePath);
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGFN("iOS startup: patched executable loaded at 0x{:08X}.", entry);
++#endif
+ 
+     if (!runInstallerWizard)
+     {
+@@ -387,9 +409,30 @@ int main(int argc, char *argv[])
+         }
+     }
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGN("iOS startup: graphics initialized.");
++#endif
+     Video::StartPipelinePrecompilation();
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    // SDL_main is invoked from UIKit's main run loop. Keep that thread pumping
++    // UIKit/SDL lifecycle events and run the recompiled Xbox guest separately.
++    // This allows background/foreground callbacks to complete before iOS's
++    // watchdog deadline.
++    LOGFN("iOS startup: starting guest worker at 0x{:08X}.", entry);
++    GuestThread::Start({ entry, 0, 0 }, nullptr);
++
++    LOGN("iOS startup: entering SDL event pump.");
++    while (true)
++    {
++        SDL_PumpEvents();
++        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
++        GameWindow::Update();
++        SDL_Delay(1);
++    }
++#else
+     GuestThread::Start({ entry, 0, 0 });
++#endif
+ 
+     return 0;
+ }
 diff --git a/UnleashedRecomp/mod/mod_loader.cpp b/UnleashedRecomp/mod/mod_loader.cpp
 index 804cc2f..d838f2f 100644
 --- a/UnleashedRecomp/mod/mod_loader.cpp
@@ -677,7 +799,7 @@ index 0000000..736b084
 +}
 +}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-index 817db38..680438a 100644
+index 817db38..c890dc5 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 +++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 @@ -6,28 +6,73 @@
@@ -760,8 +882,31 @@ index 817db38..680438a 100644
          <key>UIFileSharingEnabled</key>
          <true />
          <key>LSSupportsOpeningDocumentsInPlace</key>
+@@ -36,6 +81,12 @@
+         <string>Allows access to game files and user-provided content.</string>
+         <key>UIApplicationSupportsIndirectInputEvents</key>
+         <true />
++        <key>UILaunchScreen</key>
++        <dict />
++        <key>UIStatusBarHidden</key>
++        <true />
++        <key>UIViewControllerBasedStatusBarAppearance</key>
++        <false />
+         <key>LSSupportsGameMode</key>
+         <true />
+         <key>LSApplicationCategoryType</key>
+diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
+index d9130f4..ce05700 100644
+--- a/UnleashedRecomp/res/version.txt
++++ b/UnleashedRecomp/res/version.txt
+@@ -1,4 +1,4 @@
+ VERSION_MILESTONE=""
+ VERSION_MAJOR=1
+ VERSION_MINOR=0
+-VERSION_REVISION=3
++VERSION_REVISION=4
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
-index 5f1259a..1db712d 100644
+index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
 +++ b/UnleashedRecomp/ui/game_window.cpp
 @@ -1,4 +1,5 @@
@@ -779,20 +924,59 @@ index 5f1259a..1db712d 100644
          ImGui_ImplSDL2_ProcessEvent(event);
  
      for (auto listener : GetEventListeners())
+@@ -172,6 +173,10 @@ void GameWindow::Init(const char* sdlVideoDriver)
+     SDL_SetHint("SDL_APP_ID", "io.github.hedge_dev.unleashedrecomp");
+ #endif
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
++#endif
++
+     if (SDL_VideoInit(sdlVideoDriver) != 0 && sdlVideoDriver)
+     {
+         LOGFN_ERROR("Failed to initialise the SDL video driver: \"{}\". Falling back to default.", sdlVideoDriver);
+@@ -345,6 +350,12 @@ bool GameWindow::IsFullscreen()
+ 
+ bool GameWindow::SetFullscreen(bool isEnabled)
+ {
++#ifdef UNLEASHED_RECOMP_IOS
++    // UIKit has no useful windowed game mode. Keep the SDL surface attached to
++    // the entire native display even if a persisted desktop setting says no.
++    isEnabled = true;
++#endif
++
+     if (isEnabled)
+     {
+         SDL_SetWindowFullscreen(s_pWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+@@ -446,8 +457,12 @@ uint32_t GameWindow::GetWindowFlags()
+     if (Config::WindowState == EWindowState::Maximised)
+         flags |= SDL_WINDOW_MAXIMIZED;
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    flags |= SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS;
++#else
+     if (Config::Fullscreen)
+         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
++#endif
+ 
+ #ifdef SDL_VULKAN_ENABLED
+     flags |= SDL_WINDOW_VULKAN;
 diff --git a/UnleashedRecomp/ui/touch_controls.cpp b/UnleashedRecomp/ui/touch_controls.cpp
 new file mode 100644
-index 0000000..8f903f0
+index 0000000..11533b2
 --- /dev/null
 +++ b/UnleashedRecomp/ui/touch_controls.cpp
-@@ -0,0 +1,634 @@
+@@ -0,0 +1,654 @@
 +#include "touch_controls.h"
 +
 +#include <algorithm>
 +#include <array>
++#include <atomic>
 +#include <cfloat>
 +#include <cmath>
 +#include <cstddef>
 +#include <cstdint>
++#include <mutex>
 +#include <vector>
 +
 +#include <imgui.h>
@@ -847,13 +1031,15 @@ index 0000000..8f903f0
 +        BUTTON_L1,
 +        BUTTON_R1,
 +        BUTTON_R2,
++        BUTTON_START,
 +        BUTTON_COUNT
 +    };
 +
 +    static VirtualStick g_leftStick;
 +    static std::array<VirtualButton, BUTTON_COUNT> g_buttons;
 +    static XAMINPUT_GAMEPAD g_gamepadState{};
-+    static bool g_isActive;
++    static std::atomic<bool> g_isActive;
++    static std::mutex g_stateMutex;
 +    static float g_viewportWidth = 1280.0f;
 +    static float g_viewportHeight = 720.0f;
 +
@@ -985,6 +1171,10 @@ index 0000000..8f903f0
 +                faceCentre.y - faceGap * 1.48f
 +            },
 +            shoulderWidth, shoulderHeight, "R2", 0, true);
++
++        ConfigureCapsuleButton(BUTTON_START,
++            { width * 0.5f, height - bottomInset },
++            104.0f * scale, 40.0f * scale, "START", XAMINPUT_GAMEPAD_START);
 +    }
 +
 +    static bool HitTest(const VirtualButton& button, const ImVec2& point)
@@ -1296,11 +1486,16 @@ index 0000000..8f903f0
 +            if (event->type == SDL_APP_WILLENTERBACKGROUND ||
 +                (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_FOCUS_LOST))
 +            {
++                std::lock_guard lock(g_stateMutex);
 +                ResetState();
 +                return false;
 +            }
 +
 +            if (!TouchControls::IsActive())
++                return false;
++
++            std::lock_guard lock(g_stateMutex);
++            if (!g_isActive.load(std::memory_order_acquire))
 +                return false;
 +
 +            UpdateLayout();
@@ -1327,7 +1522,8 @@ index 0000000..8f903f0
 +
 +void TouchControls::Init()
 +{
-+    g_isActive = false;
++    std::lock_guard lock(g_stateMutex);
++    g_isActive.store(false, std::memory_order_release);
 +    UpdateLayout();
 +    ResetState();
 +}
@@ -1339,16 +1535,17 @@ index 0000000..8f903f0
 +    // overlay becomes active again on the first frame after disconnection.
 +    active = active && !hid::IsDualSenseConnected();
 +
-+    if (g_isActive && !active)
++    std::lock_guard lock(g_stateMutex);
++    if (g_isActive.load(std::memory_order_relaxed) && !active)
 +        ResetState();
 +
-+    g_isActive = active;
++    g_isActive.store(active, std::memory_order_release);
 +}
 +
 +bool TouchControls::IsActive()
 +{
 +#ifdef UNLEASHED_RECOMP_IOS
-+    return g_isActive;
++    return g_isActive.load(std::memory_order_acquire);
 +#else
 +    return false;
 +#endif
@@ -1375,6 +1572,7 @@ index 0000000..8f903f0
 +
 +XAMINPUT_GAMEPAD TouchControls::GetState()
 +{
++    std::lock_guard lock(g_stateMutex);
 +    return g_gamepadState;
 +}
 +
@@ -1395,6 +1593,10 @@ index 0000000..8f903f0
 +void TouchControls::Draw()
 +{
 +    if (!IsActive())
++        return;
++
++    std::lock_guard lock(g_stateMutex);
++    if (!g_isActive.load(std::memory_order_acquire))
 +        return;
 +
 +    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;

@@ -9,6 +9,18 @@ The source is pinned to
 [`Markos-Th09/UnleashedRecomp`](https://github.com/Markos-Th09/UnleashedRecomp)
 commit `5d5adbc7e6953990be3184e8614787d93940b713` on its `ios` branch.
 
+## Download
+
+Private release:
+[`day-stage-arcade-v1`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/day-stage-arcade-v1)
+
+- File: `Unleashed-Day-Stage-Arcade.ipa`
+- Size: `1,752,629,894` bytes (1.632 GiB)
+- SHA-256: `f30b536e0114f5b990a2de3143b40313d857b9a702d08bcede8c8e5d5140c559`
+
+Download that one IPA and drag it directly into Sideloadly. There are no
+numbered parts and no reconstruction step.
+
 ## Arcade edition
 
 - Keeps the Sonic Unleashed title screen. Pressing Start continues directly

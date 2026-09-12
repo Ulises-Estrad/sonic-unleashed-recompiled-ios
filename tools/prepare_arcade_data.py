@@ -59,6 +59,10 @@ EGGMANLAND_SUPPORT_ARCHIVES = {
     "EvilActionCommonGeneral",
     "EvilActionCommon_EggmanLand",
 }
+# The title-to-selector transition requests this shared family before the
+# selector appears. It is not a reachable town, but removing it leaves the
+# retail archive loader waiting indefinitely at the post-logo loading screen.
+ARCADE_FLOW_SUPPORT_ARCHIVES = {"Town_Common"}
 SIDELOADLY_MAX_UNCOMPRESSED_BYTES = 1_900_000_000
 
 
@@ -136,6 +140,9 @@ def keep_sideloadly_root_file(path: Path, archives: set[str]) -> bool:
         return archive in archives
     if archive.startswith("ActN_"):
         return False
+
+    if archive in ARCADE_FLOW_SUPPORT_ARCHIVES:
+        return True
 
     # Town, story, Tails, and unused boss archives cannot be reached from the
     # arcade flow. BossEggBeetle is retained because one selected Mazuri act

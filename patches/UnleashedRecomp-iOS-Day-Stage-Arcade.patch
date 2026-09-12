@@ -1,5 +1,5 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..dda29a2 100644
+index 6f3a2e7..8a8248e 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
 @@ -1,5 +1,11 @@
@@ -22,7 +22,19 @@ index 6f3a2e7..dda29a2 100644
      "ui/tv_static.cpp"
  )
  
-@@ -485,10 +492,15 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+@@ -332,7 +339,10 @@ elseif(APPLE)
+         OUTPUT_VAR MACOS_BUNDLE_VERSION
+     )
+ 
+-    set(IOS_BUNDLE_VERSION ${MACOS_BUNDLE_VERSION})
++    # Apple bundle versions are numeric. CreateVersionString intentionally adds
++    # a leading "v" for human-readable desktop version strings, which makes the
++    # generated IPA fail validation in sideloading tools.
++    string(REGEX REPLACE "^v" "" IOS_BUNDLE_VERSION "${MACOS_BUNDLE_VERSION}")
+ 
+     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+         add_executable(UnleashedRecomp MACOSX_BUNDLE ${UNLEASHED_RECOMP_CXX_SOURCES})
+@@ -485,10 +495,15 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -655,10 +667,19 @@ index 0000000..736b084
 +}
 +}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-index 817db38..5f90b2d 100644
+index 817db38..08a7b4b 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 +++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-@@ -18,7 +18,7 @@
+@@ -13,12 +13,16 @@
+         <string>Unleashed Recompiled</string>
+         <key>CFBundlePackageType</key>
+         <string>APPL</string>
++        <key>CFBundleSupportedPlatforms</key>
++        <array>
++            <string>iPhoneOS</string>
++        </array>
+         <key>CFBundleShortVersionString</key>
+         <string>@IOS_BUNDLE_VERSION@</string>
          <key>CFBundleVersion</key>
          <string>@IOS_BUNDLE_VERSION@</string>
          <key>MinimumOSVersion</key>

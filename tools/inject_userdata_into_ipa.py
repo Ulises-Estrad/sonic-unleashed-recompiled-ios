@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import plistlib
+import re
 import shutil
 import zipfile
 
@@ -23,6 +24,7 @@ REQUIRED_FILES = (
 )
 MANIFEST_NAME = "BundledGameData-manifest.json"
 ZIP64_EXTRA_FIELD_ID = 0x0001
+BUNDLE_VERSION_RE = re.compile(r"[0-9]+(?:\.[0-9]+){0,2}")
 
 
 def validate_source(source: Path) -> None:
@@ -61,7 +63,37 @@ def extra_field_ids(extra: bytes) -> set[int]:
     return ids
 
 
-def validate_ios_bundle(archive: zipfile.ZipFile) -> str:
+def validate_sideloadly_metadata(info: dict[object, object]) -> None:
+    for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+        version = info.get(key)
+        if not isinstance(version, str) or not BUNDLE_VERSION_RE.fullmatch(version):
+            raise ValueError(f"Info.plist has an invalid {key}: {version!r}")
+
+    platforms = info.get("CFBundleSupportedPlatforms")
+    if not isinstance(platforms, list) or "iPhoneOS" not in platforms:
+        raise ValueError(
+            "Info.plist must declare iPhoneOS in CFBundleSupportedPlatforms"
+        )
+
+
+def normalized_info_plist(source: bytes) -> bytes:
+    try:
+        info = plistlib.loads(source)
+    except plistlib.InvalidFileException as error:
+        raise ValueError("IPA has an invalid Info.plist") from error
+
+    for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+        version = info.get(key)
+        if isinstance(version, str) and version.startswith("v"):
+            info[key] = version[1:]
+    info["CFBundleSupportedPlatforms"] = ["iPhoneOS"]
+    validate_sideloadly_metadata(info)
+    return plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False)
+
+
+def validate_ios_bundle(
+    archive: zipfile.ZipFile, *, require_sideloadly_metadata: bool = False
+) -> str:
     prefix = app_prefix(archive)
     plist_name = prefix + "Info.plist"
     try:
@@ -83,10 +115,14 @@ def validate_ios_bundle(archive: zipfile.ZipFile) -> str:
         ) from error
     if executable_info.is_dir() or executable_info.file_size == 0:
         raise ValueError(f"IPA executable is empty: {executable_name}")
+    if require_sideloadly_metadata:
+        validate_sideloadly_metadata(info)
     return prefix
 
 
-def validate_standard_zip(ipa: Path) -> None:
+def validate_standard_zip(
+    ipa: Path, *, require_sideloadly_metadata: bool = False
+) -> None:
     """Reject ZIP64 because Sideloadly reports these huge IPAs as invalid apps."""
 
     if ipa.stat().st_size >= zipfile.ZIP64_LIMIT:
@@ -95,7 +131,9 @@ def validate_standard_zip(ipa: Path) -> None:
             f"must remain below {zipfile.ZIP64_LIMIT} bytes"
         )
     with zipfile.ZipFile(ipa, "r") as archive:
-        validate_ios_bundle(archive)
+        validate_ios_bundle(
+            archive, require_sideloadly_metadata=require_sideloadly_metadata
+        )
         if archive.start_dir >= zipfile.ZIP64_LIMIT:
             raise ValueError("IPA central directory requires ZIP64")
         for info in archive.infolist():
@@ -172,7 +210,14 @@ def inject(compiled_ipa: Path, data_root: Path, output_ipa: Path, compression_le
                 for info in source_archive.infolist():
                     if info.filename in excluded_files or info.filename.startswith(excluded_prefixes):
                         continue
-                    copy_zip_entry(source_archive, output_archive, info)
+                    if info.filename == prefix + "Info.plist":
+                        copied_info = copy.copy(info)
+                        output_archive.writestr(
+                            copied_info,
+                            normalized_info_plist(source_archive.read(info)),
+                        )
+                    else:
+                        copy_zip_entry(source_archive, output_archive, info)
 
                 # Include the complete prepared root, not just the five retail
                 # directories. The arcade overlay lives beside them as
@@ -197,13 +242,13 @@ def inject(compiled_ipa: Path, data_root: Path, output_ipa: Path, compression_le
         output_ipa.unlink(missing_ok=True)
         raise
 
-    validate_standard_zip(output_ipa)
+    validate_standard_zip(output_ipa, require_sideloadly_metadata=True)
     print(f"Created {output_ipa} with {len(manifest)} bundled files ({total_bytes} bytes)")
 
 
 def verify(ipa: Path) -> None:
     ipa = ipa.resolve()
-    validate_standard_zip(ipa)
+    validate_standard_zip(ipa, require_sideloadly_metadata=True)
     with zipfile.ZipFile(ipa, "r") as archive:
         prefix = validate_ios_bundle(archive)
         manifest = json.loads(archive.read(prefix + MANIFEST_NAME))

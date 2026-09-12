@@ -16,7 +16,7 @@ Private release:
 
 - File: `Unleashed-Day-Stage-Arcade.ipa`
 - Size: `1,752,629,894` bytes (1.632 GiB)
-- SHA-256: `f30b536e0114f5b990a2de3143b40313d857b9a702d08bcede8c8e5d5140c559`
+- SHA-256: `c469ab761632f53a972a59ab1e99d944734a04d691caede3afa588f10dc9e88d`
 
 Download that one IPA and drag it directly into Sideloadly. There are no
 numbered parts and no reconstruction step.
@@ -70,17 +70,21 @@ frame after the controller disconnects.
 
 ## Why the final IPA is below 2 GB
 
-The earlier 9.2 GB package required ZIP64. Sideloadly 0.60 rejected that
-archive as “This does not look like valid iOS app.” Splitting the file for
-GitHub storage did not change the reconstructed IPA's ZIP64 structure.
+The earlier 9.2 GB package required ZIP64 and Sideloadly 0.60 rejected it.
+Splitting the file for GitHub storage did not change the reconstructed IPA's
+ZIP64 structure. The first reduced archive exposed a separate metadata issue:
+the upstream template generated `v1.0.3` as an Apple bundle version and did not
+declare `iPhoneOS` in `CFBundleSupportedPlatforms`. Both the source patch and
+the local injector now normalize those fields before an IPA can pass
+verification.
 
 `tools/prepare_arcade_data.py` instead creates a non-destructive reduced data
 tree containing the title assets, all 48 selected stages and their required
 dependencies, required menu/stage audio, the update, patched executable, save,
-and arcade overlay. The current prepared tree is 1,746,641,380 uncompressed
-bytes across 1,376 files. `tools/inject_userdata_into_ipa.py` refuses ZIP64,
-validates the app bundle and executable, hashes every injected file, and tests
-the completed standard ZIP.
+and arcade overlay. The current prepared tree is 1,746,641,792 uncompressed
+bytes across 1,377 files. `tools/inject_userdata_into_ipa.py` refuses ZIP64,
+validates the app bundle, iPhone platform metadata, and executable, hashes
+every injected file, and tests the completed standard ZIP.
 
 ## Build and packaging flow
 

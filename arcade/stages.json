@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "expected_stage_count": 48,
+  "countries": [
+    {
+      "name": "Apotos",
+      "archive_suffix": "Mykonos",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_MykonosAct1", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_MykonosAct2", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubMykonos_01", "source": "game" },
+        { "label": "Act 4", "archive": "ActD_SubMykonos_02", "source": "Apotos & Shamar Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubMykonos_04", "source": "Apotos & Shamar Adventure Pack", "geometry": "ActD_MykonosAct1" },
+        { "label": "Act 2 (Hard)", "archive": "ActD_SubMykonos_05", "source": "Apotos & Shamar Adventure Pack", "geometry": "ActD_MykonosAct2" }
+      ]
+    },
+    {
+      "name": "Mazuri",
+      "archive_suffix": "Africa",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_Africa", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubAfrica_01", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubAfrica_03", "source": "game" },
+        { "label": "Act 4", "archive": "ActD_SubAfrica_02", "source": "Mazuri Adventure Pack" },
+        { "label": "Act 5", "archive": "ActD_SubAfrica_04", "source": "Mazuri Adventure Pack", "append": ["BossEggBeetle"] },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubAfrica_05", "source": "Mazuri Adventure Pack", "geometry": "ActD_Africa" },
+        { "label": "Act 3 (Hard)", "archive": "ActD_SubAfrica_06", "source": "Mazuri Adventure Pack", "geometry": "ActD_SubAfrica_03" }
+      ]
+    },
+    {
+      "name": "Spagonia",
+      "archive_suffix": "EU",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_EU", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubEU_01", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubEU_02", "source": "game" },
+        { "label": "Act 4", "archive": "ActD_SubEU_03", "source": "Spagonia Adventure Pack" },
+        { "label": "Act 5", "archive": "ActD_SubEU_04", "source": "Spagonia Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubEU_05", "source": "Spagonia Adventure Pack", "geometry": "ActD_EU" },
+        { "label": "Act 2 (Hard)", "archive": "ActD_SubEU_06", "source": "Spagonia Adventure Pack", "geometry": "ActD_SubEU_01" }
+      ]
+    },
+    {
+      "name": "Chun-Nan",
+      "archive_suffix": "China",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_China", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubChina_03", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubChina_04", "source": "game" },
+        { "label": "Act 4", "archive": "ActD_SubChina_01", "source": "Chun-nan Adventure Pack" },
+        { "label": "Act 5", "archive": "ActD_SubChina_02", "source": "Chun-nan Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubChina_05", "source": "Chun-nan Adventure Pack", "geometry": "ActD_China" },
+        { "label": "Act 2 (Hard)", "archive": "ActD_SubChina_06", "source": "Chun-nan Adventure Pack", "geometry": "ActD_SubChina_03" }
+      ]
+    },
+    {
+      "name": "Adabat",
+      "archive_suffix": "Beach",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_Beach", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubBeach_02", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubBeach_04", "source": "game" },
+        { "label": "Act 4", "archive": "ActD_SubBeach_01", "source": "Empire City & Adabat Adventure Pack" },
+        { "label": "Act 5", "archive": "ActD_SubBeach_03", "source": "Empire City & Adabat Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubBeach_05", "source": "Empire City & Adabat Adventure Pack", "geometry": "ActD_Beach" }
+      ]
+    },
+    {
+      "name": "Holoska",
+      "archive_suffix": "Snow",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_Snow", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubSnow_01", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubSnow_02", "source": "Holoska Adventure Pack" },
+        { "label": "Act 4", "archive": "ActD_SubSnow_03", "source": "Holoska Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubSnow_04", "source": "Holoska Adventure Pack", "geometry": "ActD_Snow" },
+        { "label": "Act 2 (Hard)", "archive": "ActD_SubSnow_05", "source": "Holoska Adventure Pack", "geometry": "ActD_SubSnow_01" }
+      ]
+    },
+    {
+      "name": "Shamar",
+      "archive_suffix": "Petra",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_Petra", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubPetra_03", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubPetra_02", "source": "Apotos & Shamar Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubPetra_04", "source": "Apotos & Shamar Adventure Pack", "geometry": "ActD_Petra" }
+      ]
+    },
+    {
+      "name": "Empire City",
+      "archive_suffix": "NY",
+      "stages": [
+        { "label": "Act 1", "archive": "ActD_NY", "source": "game" },
+        { "label": "Act 2", "archive": "ActD_SubNY_01", "source": "game" },
+        { "label": "Act 3", "archive": "ActD_SubNY_02", "source": "Empire City & Adabat Adventure Pack" },
+        { "label": "Act 1 (Hard)", "archive": "ActD_SubNY_03", "source": "Empire City & Adabat Adventure Pack", "geometry": "ActD_NY" }
+      ]
+    },
+    {
+      "name": "Eggmanland",
+      "archive_suffix": "EggmanLand",
+      "stages": [
+        { "label": "Day Route", "archive": "Act_EggmanLand", "source": "game", "eggmanland_day_mod": true }
+      ]
+    }
+  ]
+}

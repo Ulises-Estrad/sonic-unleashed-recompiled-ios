@@ -1,8 +1,20 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..28a2a56 100644
+index 6f3a2e7..dda29a2 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
-@@ -187,6 +187,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
+@@ -1,5 +1,11 @@
+ project("UnleashedRecomp")
+ 
++option(
++    UNLEASHED_RECOMP_DAY_STAGE_ARCADE
++    "Build the private day-stage arcade flow"
++    OFF
++)
++
+ if(WIN32)
+     option(UNLEASHED_RECOMP_D3D12 "Add D3D12 support for rendering" ON)
+ endif()
+@@ -187,6 +193,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
      "ui/message_window.cpp"
      "ui/options_menu.cpp"
      "ui/options_menu_thumbnails.cpp"
@@ -10,7 +22,7 @@ index 6f3a2e7..28a2a56 100644
      "ui/tv_static.cpp"
  )
  
-@@ -485,6 +486,7 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+@@ -485,10 +492,15 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -18,6 +30,113 @@ index 6f3a2e7..28a2a56 100644
      list(PREPEND UNLEASHED_RECOMP_LINK_LIBS SDL2::SDL2main)
      list(APPEND UNLEASHED_RECOMP_LINK_LIBS "-framework UniformTypeIdentifiers")
  endif()
+ 
++if(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++endif()
++
+ target_link_libraries(UnleashedRecomp PRIVATE ${UNLEASHED_RECOMP_LINK_LIBS})
+ 
+ target_include_directories(UnleashedRecomp PRIVATE
+Submodule UnleashedRecomp/api contains modified content
+diff --git a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
+index 59e2d07..b9dfd5e 100644
+--- a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
++++ b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
+@@ -12,11 +12,15 @@ namespace SWA
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcSpeedGauge;
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcRingEnergyGauge;
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcGaugeFrame;
+-        SWA_INSERT_PADDING(0x28);
++        Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcExpCount;
++        SWA_INSERT_PADDING(0x20);
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcScoreCount;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount2;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount3;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcPlayerCount;
+     };
++
++    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcExpCount, 0x100);
++    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
+ }
+diff --git a/UnleashedRecomp/app.cpp b/UnleashedRecomp/app.cpp
+index b298ebc..8100cff 100644
+--- a/UnleashedRecomp/app.cpp
++++ b/UnleashedRecomp/app.cpp
+@@ -7,6 +7,7 @@
+ #include <patches/audio_patches.h>
+ #include <patches/inspire_patches.h>
+ #include <ui/game_window.h>
++#include <ui/options_menu.h>
+ #include <user/config.h>
+ #include <user/paths.h>
+ #include <user/registry.h>
+@@ -44,6 +45,20 @@ PPC_FUNC(sub_824EB490)
+ 
+ static std::thread::id g_mainThreadId = std::this_thread::get_id();
+ 
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++static bool g_arcadeSelectorOptionsOpen = false;
++
++static bool IsArcadeStageSelector()
++{
++    auto pGameDocument = SWA::CGameDocument::GetInstance();
++    if (!pGameDocument || !pGameDocument->m_pMember)
++        return false;
++
++    const char* stageName = pGameDocument->m_pMember->m_StageName.c_str();
++    return stageName && strcmp(stageName, "SelectStage") == 0;
++}
++#endif
++
+ // SWA::CApplication::Update
+ PPC_FUNC_IMPL(__imp__sub_822C1130);
+ PPC_FUNC(sub_822C1130)
+@@ -92,6 +107,43 @@ PPC_FUNC(sub_822C1130)
+     if (Config::EnableStageCollisionDebugView)
+         *SWA::SGlobals::ms_IsCollisionRender = true;
+ 
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // The retail debug selector has no options shortcut. Give Start/Options the
++    // same options overlay used by the title screen and suppress selector input
++    // while that overlay is open.
++    if (IsArcadeStageSelector())
++    {
++        if (auto pInputState = SWA::CInputState::GetInstance())
++        {
++            auto& padState = const_cast<SWA::SPadState&>(pInputState->GetPadState());
++            if (!OptionsMenu::s_isVisible && padState.IsTapped(SWA::eKeyState_Start))
++            {
++                OptionsMenu::Open();
++                g_arcadeSelectorOptionsOpen = true;
++            }
++
++            if (OptionsMenu::s_isVisible && g_arcadeSelectorOptionsOpen)
++            {
++                const SWA::SPadState savedPadState = padState;
++                if (OptionsMenu::CanClose() && padState.IsTapped(SWA::eKeyState_B))
++                {
++                    OptionsMenu::Close();
++                    g_arcadeSelectorOptionsOpen = false;
++                }
++
++                padState = {};
++                __imp__sub_822C1130(ctx, base);
++                padState = savedPadState;
++                return;
++            }
++        }
++    }
++    else if (!OptionsMenu::s_isVisible)
++    {
++        g_arcadeSelectorOptionsOpen = false;
++    }
++#endif
++
+     __imp__sub_822C1130(ctx, base);
+ }
+ 
 diff --git a/UnleashedRecomp/apple_utils.h b/UnleashedRecomp/apple_utils.h
 index 643786e..94ca973 100644
 --- a/UnleashedRecomp/apple_utils.h
@@ -86,7 +205,7 @@ index 0205276..f5ed541 100644
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
 diff --git a/UnleashedRecomp/hid/driver/sdl_hid.cpp b/UnleashedRecomp/hid/driver/sdl_hid.cpp
-index 7623552..7cf0f5e 100644
+index 7623552..f4df262 100644
 --- a/UnleashedRecomp/hid/driver/sdl_hid.cpp
 +++ b/UnleashedRecomp/hid/driver/sdl_hid.cpp
 @@ -4,6 +4,7 @@
@@ -97,7 +216,20 @@ index 7623552..7cf0f5e 100644
  #include <kernel/xdm.h>
  #include <app.h>
  
-@@ -288,6 +289,9 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
+@@ -243,7 +244,12 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
+             auto* controller = FindController(event->cdevice.which);
+ 
+             if (controller)
++            {
++                if (g_activeController == controller)
++                    g_activeController = nullptr;
++
+                 controller->Close();
++            }
+ 
+             break;
+         }
+@@ -288,6 +294,9 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
          case SDL_MOUSEBUTTONDOWN:
          case SDL_MOUSEBUTTONUP:
          {
@@ -107,7 +239,28 @@ index 7623552..7cf0f5e 100644
              if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
                  SDL_ShowCursor(SDL_ENABLE);
  
-@@ -352,10 +356,16 @@ uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
+@@ -341,6 +350,20 @@ void hid::Init()
+     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+ }
+ 
++bool hid::IsDualSenseConnected()
++{
++    for (const auto& controller : g_controllers)
++    {
++        if (controller.controller &&
++            controller.GetControllerType() == SDL_CONTROLLER_TYPE_PS5)
++        {
++            return true;
++        }
++    }
++
++    return false;
++}
++
+ uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
+ {
+     static uint32_t packet;
+@@ -352,10 +375,16 @@ uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
  
      pState->dwPacketNumber = packet++;
  
@@ -126,7 +279,7 @@ index 7623552..7cf0f5e 100644
  
      return ERROR_SUCCESS;
  }
-@@ -365,6 +375,9 @@ uint32_t hid::SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration)
+@@ -365,6 +394,9 @@ uint32_t hid::SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration)
      if (!pVibration)
          return ERROR_BAD_ARGUMENTS;
  
@@ -136,7 +289,7 @@ index 7623552..7cf0f5e 100644
      if (!g_activeController)
          return ERROR_DEVICE_NOT_CONNECTED;
  
-@@ -378,7 +391,9 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
+@@ -378,7 +410,9 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
      if (!pCaps)
          return ERROR_BAD_ARGUMENTS;
  
@@ -147,7 +300,7 @@ index 7623552..7cf0f5e 100644
          return ERROR_DEVICE_NOT_CONNECTED;
  
      memset(pCaps, 0, sizeof(*pCaps));
-@@ -386,8 +401,14 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
+@@ -386,8 +420,14 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
      pCaps->Type = XAMINPUT_DEVTYPE_GAMEPAD;
      pCaps->SubType = XAMINPUT_DEVSUBTYPE_GAMEPAD; // TODO: other types?
      pCaps->Flags = 0;
@@ -164,20 +317,259 @@ index 7623552..7cf0f5e 100644
  
      return ERROR_SUCCESS;
  }
+diff --git a/UnleashedRecomp/hid/hid.h b/UnleashedRecomp/hid/hid.h
+index d61131f..1101524 100644
+--- a/UnleashedRecomp/hid/hid.h
++++ b/UnleashedRecomp/hid/hid.h
+@@ -43,6 +43,7 @@ namespace hid
+     uint32_t SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration);
+     uint32_t GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps);
+ 
++    bool IsDualSenseConnected();
+     void SetProhibitedInputs(uint16_t wButtons = 0, bool leftStick = false, bool rightStick = false);
+     bool IsInputAllowed();
+     bool IsInputDeviceController();
 diff --git a/UnleashedRecomp/main.cpp b/UnleashedRecomp/main.cpp
-index e34d7e1..3f37fcb 100644
+index e34d7e1..7b97724 100644
 --- a/UnleashedRecomp/main.cpp
 +++ b/UnleashedRecomp/main.cpp
-@@ -213,6 +213,9 @@ int main(int argc, char *argv[])
+@@ -213,6 +213,12 @@ int main(int argc, char *argv[])
  
      os::logger::Init();
  
 +    if (!SeedBundledSaveData())
 +        LOGN_WARNING("Unable to seed the bundled save data; existing user saves were left unchanged.");
 +
++    if (!PrepareArcadeSaveData())
++        LOGN_WARNING("Unable to apply the arcade stat defaults; the save backup was left unchanged.");
++
  #if TARGET_OS_IOS
      if (!apple::SupportsBCTextures()) {
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_iOS_UnsupportedGPU_BCTextures").c_str(), GameWindow::s_pWindow);
+diff --git a/UnleashedRecomp/mod/mod_loader.cpp b/UnleashedRecomp/mod/mod_loader.cpp
+index 804cc2f..d838f2f 100644
+--- a/UnleashedRecomp/mod/mod_loader.cpp
++++ b/UnleashedRecomp/mod/mod_loader.cpp
+@@ -94,13 +94,15 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
+ void ModLoader::Init()
+ {
+     const std::filesystem::path& userPath = GetUserPath();
++    std::filesystem::path configIniPath = userPath / "cpkredir.ini";
+ 
+     IniFile configIni;
+-    if (!configIni.read(userPath / "cpkredir.ini"))
++    if (!configIni.read(configIniPath))
+     {
+         configIni = {};
++        configIniPath = GetGamePath() / "cpkredir.ini";
+ 
+-        if (!configIni.read(GetGamePath() / "cpkredir.ini"))
++        if (!configIni.read(configIniPath))
+             return;
+     }
+ 
+@@ -128,8 +130,13 @@ void ModLoader::Init()
+     if (modsDbIniFilePathU8.empty())
+         return;
+ 
++    std::filesystem::path modsDbIniFilePath(
++        std::u8string_view((const char8_t*)modsDbIniFilePathU8.c_str()));
++    if (modsDbIniFilePath.is_relative())
++        modsDbIniFilePath = configIniPath.parent_path() / modsDbIniFilePath;
++
+     IniFile modsDbIni;
+-    if (!modsDbIni.read(std::u8string_view((const char8_t*)modsDbIniFilePathU8.c_str())))
++    if (!modsDbIni.read(modsDbIniFilePath))
+         return;
+ 
+     bool foundModSaveFilePath = false;
+@@ -146,6 +153,8 @@ void ModLoader::Init()
+             continue;
+ 
+         std::filesystem::path modIniFilePath(std::u8string_view((const char8_t*)modIniFilePathU8.c_str()));
++        if (modIniFilePath.is_relative())
++            modIniFilePath = modsDbIniFilePath.parent_path() / modIniFilePath;
+ 
+         IniFile modIni;
+         if (!modIni.read(modIniFilePath))
+diff --git a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
+index 61ac40d..7ce5844 100644
+--- a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
++++ b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
+@@ -15,6 +15,12 @@ static bool g_installMessageOpen = false;
+ static bool g_installMessageFaderBegun = false;
+ static int g_installMessageResult = -1;
+ 
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++static SWA::CTitleStateMenu* g_arcadeTitleMenu = nullptr;
++static uint32_t g_arcadeTitleMenuFrames = 0;
++static bool g_arcadeTitleMenuAccepted = false;
++#endif
++
+ #if TARGET_OS_IOS
+ #include <CoreFoundation/CoreFoundation.h>
+ 
+@@ -73,7 +79,7 @@ PPC_FUNC(sub_825882B8)
+     auto pGameDocument = SWA::CGameDocument::GetInstance();
+ 
+     auto pInputState = SWA::CInputState::GetInstance();
+-    auto& pPadState = pInputState->GetPadState();
++    auto& pPadState = const_cast<SWA::SPadState&>(pInputState->GetPadState());
+     auto isAccepted = pPadState.IsTapped(SWA::eKeyState_A) || pPadState.IsTapped(SWA::eKeyState_Start);
+ 
+     auto pContext = pTitleStateMenu->GetContextBase<SWA::CTitleStateMenu::CTitleStateMenuContext>();
+@@ -81,6 +87,39 @@ PPC_FUNC(sub_825882B8)
+     auto isOptionsIndex = pContext->m_pTitleMenu->m_CursorIndex == 2;
+     auto isInstallIndex = pContext->m_pTitleMenu->m_CursorIndex == 3;
+ 
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // Keep the normal title screen, but collapse the menu after it to one
++    // automatic Continue action. StartPlay/Opening are redirected by the
++    // bundled arcade data overlay, so this enters the stage selector without
++    // exposing story, town or world-map choices.
++    if (g_arcadeTitleMenu != pTitleStateMenu)
++    {
++        g_arcadeTitleMenu = pTitleStateMenu;
++        g_arcadeTitleMenuFrames = 0;
++        g_arcadeTitleMenuAccepted = false;
++    }
++
++    if (!g_arcadeTitleMenuAccepted && !App::s_isSaveDataCorrupt)
++    {
++        pContext->m_pTitleMenu->m_CursorIndex = 1;
++        isNewGameIndex = false;
++        isOptionsIndex = false;
++        isInstallIndex = false;
++
++        // Allow the retail menu scene to finish its entrance transition before
++        // synthesising the one-frame accept tap.
++        if (++g_arcadeTitleMenuFrames >= 12)
++        {
++            const uint32_t tapped = pPadState.TappedState;
++            pPadState.TappedState = tapped | SWA::eKeyState_A;
++            __imp__sub_825882B8(ctx, base);
++            pPadState.TappedState = tapped;
++            g_arcadeTitleMenuAccepted = true;
++            return;
++        }
++    }
++#endif
++
+     // Always default to New Game with corrupted save data.
+     if (App::s_isSaveDataCorrupt && pContext->m_pTitleMenu->m_CursorIndex == 1)
+         pContext->m_pTitleMenu->m_CursorIndex = 0;
+diff --git a/UnleashedRecomp/patches/misc_patches.cpp b/UnleashedRecomp/patches/misc_patches.cpp
+index ec4e1a8..a43bcf7 100644
+--- a/UnleashedRecomp/patches/misc_patches.cpp
++++ b/UnleashedRecomp/patches/misc_patches.cpp
+@@ -41,7 +41,11 @@ bool DisableEvilControlTutorialMidAsmHook(PPCRegister& r4, PPCRegister& r5)
+ 
+ bool DisableDLCIconMidAsmHook()
+ {
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    return true;
++#else
+     return Config::DisableDLCIcon;
++#endif
+ }
+ 
+ void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
+diff --git a/UnleashedRecomp/patches/player_patches.cpp b/UnleashedRecomp/patches/player_patches.cpp
+index cce0a58..88f54cf 100644
+--- a/UnleashedRecomp/patches/player_patches.cpp
++++ b/UnleashedRecomp/patches/player_patches.cpp
+@@ -10,6 +10,39 @@ static uint32_t g_lastTrickScore;
+ static float g_lastDarkGaiaEnergy;
+ static bool g_isUnleashCancelled;
+ 
++static bool ShouldSaveStageScore()
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    return true;
++#else
++    return Config::SaveScoreAtCheckpoints;
++#endif
++}
++
++// The retail setters cap life counts above 99. Presenting 100 to their compare
++// instructions makes both setters execute their existing "store 99" path on
++// every call, including calls made after a death.
++void ArcadeForceLivesMidAsmHook(PPCRegister& r11)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    r11.u32 = 100;
++#endif
++}
++
++void ArcadeHideLivesMidAsmHook(PPCRegister& r31)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    auto pHud = (SWA::CHudSonicStage*)g_memory.Translate(r31.u32);
++    if (!pHud)
++        return;
++
++    if (pHud->m_rcPlayerCount)
++        pHud->m_rcPlayerCount->SetHideFlag(true);
++    if (pHud->m_rcExpCount)
++        pHud->m_rcExpCount->SetHideFlag(true);
++#endif
++}
++
+ /* Hook function for when checkpoints are activated
+    to preserve the current checkpoint score. */
+ PPC_FUNC_IMPL(__imp__sub_82624308);
+@@ -17,7 +50,7 @@ PPC_FUNC(sub_82624308)
+ {
+     __imp__sub_82624308(ctx, base);
+ 
+-    if (!Config::SaveScoreAtCheckpoints)
++    if (!ShouldSaveStageScore())
+         return;
+ 
+     if (auto pGameDocument = SWA::CGameDocument::GetInstance())
+@@ -29,22 +62,39 @@ PPC_FUNC(sub_82624308)
+     }
+ }
+ 
+-/* Hook function that resets the score
+-   and restore the last checkpoint score. */
++/* Hook function that resets score. Restore the last checkpoint score in the
++   normal build, or the complete pre-death score in the arcade build. */
+ PPC_FUNC_IMPL(__imp__sub_8245F048);
+ PPC_FUNC(sub_8245F048)
+ {
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    uint32_t enemyScoreBeforeReset = 0;
++    uint32_t trickScoreBeforeReset = 0;
++    if (auto pGameDocument = SWA::CGameDocument::GetInstance())
++    {
++        enemyScoreBeforeReset = pGameDocument->m_pMember->m_ScoreInfo.EnemyScore;
++        trickScoreBeforeReset = pGameDocument->m_pMember->m_ScoreInfo.TrickScore;
++    }
++#endif
++
+     __imp__sub_8245F048(ctx, base);
+ 
+-    if (!Config::SaveScoreAtCheckpoints)
++    if (!ShouldSaveStageScore())
+         return;
+ 
+     if (auto pGameDocument = SWA::CGameDocument::GetInstance())
+     {
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++        // Arcade deaths retain everything earned since the previous spawn,
++        // not merely the score that existed at the last checkpoint.
++        pGameDocument->m_pMember->m_ScoreInfo.EnemyScore = enemyScoreBeforeReset;
++        pGameDocument->m_pMember->m_ScoreInfo.TrickScore = trickScoreBeforeReset;
++#else
+         LOGFN("Score: {}", g_lastEnemyScore + g_lastTrickScore);
+ 
+         pGameDocument->m_pMember->m_ScoreInfo.EnemyScore = g_lastEnemyScore;
+         pGameDocument->m_pMember->m_ScoreInfo.TrickScore = g_lastTrickScore;
++#endif
+     }
+ }
+ 
 diff --git a/UnleashedRecomp/platform/ios/nfd_stub.cpp b/UnleashedRecomp/platform/ios/nfd_stub.cpp
 new file mode 100644
 index 0000000..736b084
@@ -296,10 +688,10 @@ index 5f1259a..1db712d 100644
      for (auto listener : GetEventListeners())
 diff --git a/UnleashedRecomp/ui/touch_controls.cpp b/UnleashedRecomp/ui/touch_controls.cpp
 new file mode 100644
-index 0000000..da123f2
+index 0000000..8f903f0
 --- /dev/null
 +++ b/UnleashedRecomp/ui/touch_controls.cpp
-@@ -0,0 +1,629 @@
+@@ -0,0 +1,634 @@
 +#include "touch_controls.h"
 +
 +#include <algorithm>
@@ -849,6 +1241,11 @@ index 0000000..da123f2
 +
 +void TouchControls::SetActive(bool active)
 +{
++    // Poll the HID driver's already-open controller handles every rendered
++    // frame. A DualSense connection hides and releases the touch overlay; the
++    // overlay becomes active again on the first frame after disconnection.
++    active = active && !hid::IsDualSenseConnected();
++
 +    if (g_isActive && !active)
 +        ResetState();
 +
@@ -952,10 +1349,17 @@ index 0000000..fe5e6b0
 +    void ApplyToState(XAMINPUT_GAMEPAD& state);
 +}
 diff --git a/UnleashedRecomp/user/paths.cpp b/UnleashedRecomp/user/paths.cpp
-index e72b473..ff9b3c8 100644
+index e72b473..950504d 100644
 --- a/UnleashedRecomp/user/paths.cpp
 +++ b/UnleashedRecomp/user/paths.cpp
-@@ -61,3 +61,62 @@ const std::filesystem::path& GetUserPath()
+@@ -1,5 +1,6 @@
+ #include "paths.h"
+ #include <os/process.h>
++#include <vector>
+ #ifdef TARGET_OS_IPHONE
+ #include "../apple_utils.h"
+ #endif
+@@ -61,3 +62,132 @@ const std::filesystem::path& GetUserPath()
  {
      return g_userPath;
  }
@@ -1018,11 +1422,81 @@ index e72b473..ff9b3c8 100644
 +    return true;
 +#endif
 +}
++
++bool PrepareArcadeSaveData()
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const std::filesystem::path savePath = GetUserPath() / "save" / "SYS-DATA";
++    if (!std::filesystem::is_regular_file(savePath))
++        return false;
++
++    std::ifstream input(savePath, std::ios::binary | std::ios::ate);
++    if (!input.good() || input.tellg() < 0x20)
++        return false;
++
++    const std::streamsize size = input.tellg();
++    input.seekg(0, std::ios::beg);
++    std::vector<uint8_t> data(size);
++    if (!input.read(reinterpret_cast<char*>(data.data()), size))
++        return false;
++    input.close();
++
++    // The raw Xbox save payload stores the allocated daytime stat points as
++    // big-endian u32 values. Eight Speed points yields level 11 and four Ring
++    // Energy points yields level 6, the maxima from SkillParameter.xml.
++    auto readBigEndian = [&](size_t offset)
++    {
++        return uint32_t(data[offset]) << 24 |
++            uint32_t(data[offset + 1]) << 16 |
++            uint32_t(data[offset + 2]) << 8 |
++            uint32_t(data[offset + 3]);
++    };
++
++    auto writeBigEndian = [&](size_t offset, uint32_t value)
++    {
++        data[offset] = uint8_t(value >> 24);
++        data[offset + 1] = uint8_t(value >> 16);
++        data[offset + 2] = uint8_t(value >> 8);
++        data[offset + 3] = uint8_t(value);
++    };
++
++    bool changed = false;
++    if (readBigEndian(0x10) < 8)
++    {
++        writeBigEndian(0x10, 8);
++        changed = true;
++    }
++    if (readBigEndian(0x1C) < 4)
++    {
++        writeBigEndian(0x1C, 4);
++        changed = true;
++    }
++    if (!changed)
++        return true;
++
++    const std::filesystem::path backupPath = savePath.parent_path() / "SYS-DATA.pre-arcade";
++    std::error_code ec;
++    if (!std::filesystem::exists(backupPath))
++    {
++        std::filesystem::copy_file(savePath, backupPath, std::filesystem::copy_options::none, ec);
++        if (ec)
++            return false;
++    }
++
++    std::ofstream output(savePath, std::ios::binary | std::ios::trunc);
++    if (!output.good())
++        return false;
++    output.write(reinterpret_cast<const char*>(data.data()), data.size());
++    return output.good();
++#else
++    return true;
++#endif
++}
 diff --git a/UnleashedRecomp/user/paths.h b/UnleashedRecomp/user/paths.h
-index ecb3e04..b6c2d2f 100644
+index ecb3e04..b9a9424 100644
 --- a/UnleashedRecomp/user/paths.h
 +++ b/UnleashedRecomp/user/paths.h
-@@ -13,18 +13,8 @@ extern std::filesystem::path g_executableRoot;
+@@ -13,18 +13,9 @@ extern std::filesystem::path g_executableRoot;
  bool CheckPortable();
  std::filesystem::path BuildUserPath();
  const std::filesystem::path& GetUserPath();
@@ -1040,9 +1514,36 @@ index ecb3e04..b6c2d2f 100644
 -}
 +std::filesystem::path GetGamePath();
 +bool SeedBundledSaveData();
++bool PrepareArcadeSaveData();
  
  inline std::filesystem::path GetSavePath(bool checkForMods)
  {
+diff --git a/UnleashedRecompLib/config/SWA.toml b/UnleashedRecompLib/config/SWA.toml
+index 5063e71..07d1536 100644
+--- a/UnleashedRecompLib/config/SWA.toml
++++ b/UnleashedRecompLib/config/SWA.toml
+@@ -1153,3 +1153,21 @@ registers = ["f1"]
+ name = "CEvilSonicContext_CStateWall_LeaveRotationMidAsmHook"
+ address = 0x82406774
+ registers = ["f1"]
++
++# Day Stage Arcade: force both retail life setters down their store-99 path.
++[[midasm_hook]]
++name = "ArcadeForceLivesMidAsmHook"
++address = 0x8251A740
++registers = ["r11"]
++
++[[midasm_hook]]
++name = "ArcadeForceLivesMidAsmHook"
++address = 0x8251A768
++registers = ["r11"]
++
++# Hide the day-stage HUD's lives and EXP nodes after player-count assignment.
++[[midasm_hook]]
++name = "ArcadeHideLivesMidAsmHook"
++address = 0x824D8468
++registers = ["r31"]
++after_instruction = true
 diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
 index d5c0858..78375f2 100644
 --- a/thirdparty/CMakeLists.txt
@@ -1182,10 +1683,10 @@ index 0000000..f35de67
 +    main()
 diff --git a/tools/package_ios_ipa.sh b/tools/package_ios_ipa.sh
 new file mode 100755
-index 0000000..95b9649
+index 0000000..6e5eaf0
 --- /dev/null
 +++ b/tools/package_ios_ipa.sh
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,109 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +
@@ -1223,7 +1724,9 @@ index 0000000..95b9649
 +    exit 1
 +fi
 +
-+cmake --preset ios-device-release -DSDL2MIXER_VORBIS=VORBISFILE
++cmake --preset ios-device-release \
++    -DSDL2MIXER_VORBIS=VORBISFILE \
++    -DUNLEASHED_RECOMP_DAY_STAGE_ARCADE=ON
 +cmake --build "$BUILD_DIR" --target UnleashedRecomp -j "$JOBS"
 +
 +if [[ ! -d "$APP_PATH" ]]; then

@@ -1,4 +1,4 @@
-name: Compile unsigned iOS IPA
+name: Compile unsigned Day-Stage Arcade iOS IPA
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
       INPUT_TAG: private-build-inputs-v1
       SOURCE_COMMIT: 5d5adbc7e6953990be3184e8614787d93940b713
       SOURCE_REPOSITORY: https://github.com/Markos-Th09/UnleashedRecomp.git
-      IPA_NAME: Unleashed-DualSense-Touch-Compiled.ipa
+      IPA_NAME: Unleashed-Day-Stage-Arcade-Compiled.ipa
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -46,7 +46,7 @@ jobs:
           cp default.xexp "$RUNNER_TEMP/userdata/update/default.xexp"
           cp shader.ar "$RUNNER_TEMP/userdata/game/shader.ar"
 
-      - name: Clone pinned iOS port and apply touch patch
+      - name: Clone pinned iOS port and apply arcade patch
         shell: bash
         run: |
           set -euo pipefail
@@ -54,8 +54,8 @@ jobs:
           cd "$RUNNER_TEMP/UnleashedRecomp"
           git checkout "$SOURCE_COMMIT"
           git submodule update --init --recursive
-          git apply --check "$GITHUB_WORKSPACE/patches/UnleashedRecomp-iOS-DualSense-Touch.patch"
-          git apply "$GITHUB_WORKSPACE/patches/UnleashedRecomp-iOS-DualSense-Touch.patch"
+          git apply --check "$GITHUB_WORKSPACE/patches/UnleashedRecomp-iOS-Day-Stage-Arcade.patch"
+          git apply "$GITHUB_WORKSPACE/patches/UnleashedRecomp-iOS-Day-Stage-Arcade.patch"
 
       - name: Compile and verify unsigned device IPA
         shell: bash
@@ -76,15 +76,19 @@ jobs:
           set -euo pipefail
           RELEASE_TAG="compiled-ios-${GITHUB_RUN_NUMBER}"
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          Compiled unsigned arm64 iOS app with DualSense-style touch controls
-          and bundled-data support. This intermediate IPA does not contain the
-          full game data. The owner's local packaging step injects that data,
-          verifies the result, and publishes the split self-contained IPA.
+          Compiled unsigned arm64 iOS app for the private Day-Stage Arcade
+          edition. It includes the title-to-selector flow, arcade gameplay
+          patches, DualSense-style touch controls, automatic DualSense/touch
+          handoff, and bundled-data support.
+
+          This intermediate IPA intentionally contains no full game data. The
+          owner's local packaging step injects the validated slim data tree and
+          produces one standard-ZIP IPA for Sideloadly.
           NOTES
           gh release create "$RELEASE_TAG" \
             "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME" \
             "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Compiled iOS IPA for local data injection" \
+            --title "Compiled Day-Stage Arcade iOS IPA" \
             --notes-file "$RUNNER_TEMP/release-notes.md"

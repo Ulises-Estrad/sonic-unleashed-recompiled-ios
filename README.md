@@ -17,15 +17,21 @@ background/resume behavior are not yet verified in gameplay. Version 1.0.5
 adds persistent loading diagnostics; it is not a confirmed loading fix.
 Never install a `compiled-ios-*` release: those are code-only intermediates.
 
-Private release:
-[`day-stage-arcade-v1`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/day-stage-arcade-v1)
+Current full diagnostic IPA (private prerelease):
+[`ios-loading-diagnostics-1.0.5`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/ios-loading-diagnostics-1.0.5)
 
-- File: `Sonic-Unleashed.ipa`
-- Size: `1,752,843,976` bytes (1.632 GiB)
-- SHA-256: `a83268f836593cb13e8d7b57d22283a7e7b12f3fa89c9166c55c40776bf3aa4e`
+- File: `Sonic-Unleashed-1.0.5-Diagnostics.ipa`
+- Size: `1,752,853,606` bytes (1.632 GiB)
+- SHA-256: `55516d3a4be494acfcdcd31109ea8979d1737b4a2b7f68ee3095a235cbff82f7`
 
 Download that one IPA and drag it directly into Sideloadly. There are no
 numbered parts and no reconstruction step.
+
+Install over the existing app rather than deleting it. This diagnostic build
+saves `Sonic-Unleashed-diagnostic.log` and `Sonic-Unleashed-stderr.log` in the
+app's Documents directory so the loading blocker can be investigated without
+relying on iOS's lossy live logging. It preserves the same game data and
+arcade patches as 1.0.4 and does not claim to fix the loading blocker itself.
 
 The iOS bundle, executable, and Home Screen label are all named `Sonic
 Unleashed`. The package includes the project's Sonic artwork in every required

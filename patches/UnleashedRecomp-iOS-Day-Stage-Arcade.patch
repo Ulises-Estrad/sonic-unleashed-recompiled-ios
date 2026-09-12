@@ -83,12 +83,6 @@ index 6f3a2e7..5340eb3 100644
  target_link_libraries(UnleashedRecomp PRIVATE ${UNLEASHED_RECOMP_LINK_LIBS})
  
  target_include_directories(UnleashedRecomp PRIVATE
-diff --git a/UnleashedRecomp/api b/UnleashedRecomp/api
---- a/UnleashedRecomp/api
-+++ b/UnleashedRecomp/api
-@@ -1 +1 @@
--Subproject commit f299dd8cf272a0110c91e54e2b6e308a2d897966
-+Subproject commit f299dd8cf272a0110c91e54e2b6e308a2d897966-dirty
 diff --git a/UnleashedRecomp/app.cpp b/UnleashedRecomp/app.cpp
 index b298ebc..8100cff 100644
 --- a/UnleashedRecomp/app.cpp
@@ -2748,6 +2742,27 @@ index 0000000..087e935
 +    inline std::atomic<bool> resetTitle{false};
 +    void Draw();
 +}
+diff --git a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
+index 59e2d07..b9dfd5e 100644
+--- a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
++++ b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
+@@ -12,11 +12,15 @@ namespace SWA
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcSpeedGauge;
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcRingEnergyGauge;
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcGaugeFrame;
+-        SWA_INSERT_PADDING(0x28);
++        Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcExpCount;
++        SWA_INSERT_PADDING(0x20);
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcScoreCount;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount2;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount3;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcPlayerCount;
+     };
++
++    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcExpCount, 0x100);
++    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
+ }
 diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
 index 2abe67c..e152038 100644
 --- a/thirdparty/plume/plume_metal.cpp

@@ -18,7 +18,7 @@ jobs:
       INPUT_TAG: private-build-inputs-v1
       SOURCE_COMMIT: 5d5adbc7e6953990be3184e8614787d93940b713
       SOURCE_REPOSITORY: https://github.com/Markos-Th09/UnleashedRecomp.git
-      IPA_NAME: Sonic-Unleashed-Compiled.ipa
+      IPA_NAME: DO-NOT-INSTALL-Sonic-Unleashed-Code-Only.ipa
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -92,6 +92,11 @@ jobs:
               markers = (
                   b"iOS startup: entering SDL event pump.",
                   b"SYNC-CS-BACKEND condition-variable-ios",
+                  b"iOS startup: Day-Stage Arcade enabled; bundled GameData required.",
+                  b"Sonic-Unleashed-diagnostic.log",
+                  b"Sonic-Unleashed-stderr.log",
+                  b"File open failed: guest=",
+                  b"IOS-LOADING ExitLoading entered",
               )
               missing_markers = [marker.decode() for marker in markers if marker not in executable]
               assert not missing_markers, f"Missing iOS runtime fixes: {missing_markers}"
@@ -107,6 +112,10 @@ jobs:
           set -euo pipefail
           RELEASE_TAG="compiled-ios-${GITHUB_RUN_NUMBER}"
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          DO NOT INSTALL THIS IPA. This is a code-only build intermediate,
+          not the self-contained game. The final IPA must contain the owner's
+          locally injected game, update, DLC, save, and arcade overlay data.
+
           Compiled unsigned arm64 iOS app for the private Sonic Unleashed
           Day-Stage Arcade edition. It includes the iPhone Metal launch fix,
           Sonic Unleashed app name and icon, title-to-selector flow, arcade
@@ -123,5 +132,6 @@ jobs:
             "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Compiled Sonic Unleashed iOS IPA" \
+            --prerelease \
+            --title "BUILD INTERMEDIATE - DO NOT INSTALL" \
             --notes-file "$RUNNER_TEMP/release-notes.md"

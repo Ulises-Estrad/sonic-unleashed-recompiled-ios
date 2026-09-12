@@ -67,28 +67,6 @@ index 6f3a2e7..98153a0 100644
  target_link_libraries(UnleashedRecomp PRIVATE ${UNLEASHED_RECOMP_LINK_LIBS})
  
  target_include_directories(UnleashedRecomp PRIVATE
-Submodule UnleashedRecomp/api contains modified content
-diff --git a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
-index 59e2d07..b9dfd5e 100644
---- a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
-+++ b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
-@@ -12,11 +12,15 @@ namespace SWA
-         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcSpeedGauge;
-         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcRingEnergyGauge;
-         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcGaugeFrame;
--        SWA_INSERT_PADDING(0x28);
-+        Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcExpCount;
-+        SWA_INSERT_PADDING(0x20);
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcScoreCount;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount2;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount3;
-         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcPlayerCount;
-     };
-+
-+    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcExpCount, 0x100);
-+    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
- }
 diff --git a/UnleashedRecomp/app.cpp b/UnleashedRecomp/app.cpp
 index b298ebc..8100cff 100644
 --- a/UnleashedRecomp/app.cpp
@@ -205,7 +183,7 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..bd01f34 100644
+index 0205276..8ef7b29 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
 @@ -28,6 +28,7 @@
@@ -216,7 +194,32 @@ index 0205276..bd01f34 100644
  #include <patches/aspect_ratio_patches.h>
  #include <user/config.h>
  #include <sdl_listener.h>
-@@ -1428,6 +1429,7 @@ static void CreateImGuiBackend()
+@@ -430,6 +431,24 @@ static Mutex g_pipelineCacheMutex;
+ static std::atomic<uint32_t> g_compilingPipelineTaskCount;
+ static std::atomic<uint32_t> g_pendingPipelineTaskCount;
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++// Diagnostic counters never participate in renderer synchronization. Copy
++// unresolved guest data on its consumer thread, not on UIKit's main thread.
++static std::atomic<uint64_t> g_diagnosticPresentStarted;
++static std::atomic<uint64_t> g_diagnosticPresentCompleted;
++static std::atomic<uint64_t> g_diagnosticCommandListsCompleted;
++static std::atomic<uint64_t> g_diagnosticPipelineQueued;
++static std::atomic<uint64_t> g_diagnosticPipelineStarted;
++static std::atomic<uint64_t> g_diagnosticPipelineCompleted;
++static std::atomic<uint32_t> g_diagnosticPipelineActive;
++static std::atomic<uint64_t> g_diagnosticExitLoadingEntered;
++static std::atomic<uint32_t> g_diagnosticExitLoadingActive;
++static std::mutex g_loadingDiagnosticMutex;
++static std::string g_unresolvedPipelineDiagnostic;
++static uint32_t g_unresolvedPipelineDiagnosticCount;
++static std::chrono::steady_clock::time_point g_unresolvedPipelineDiagnosticTime;
++#endif
++
+ enum class PipelineTaskType
+ {
+     Null,
+@@ -1428,6 +1447,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -224,7 +227,7 @@ index 0205276..bd01f34 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2676,6 +2678,8 @@ static void DrawImGui()
+@@ -2676,6 +2696,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -233,7 +236,118 @@ index 0205276..bd01f34 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -7086,26 +7090,46 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -2882,8 +2904,58 @@ void Video::WaitOnSwapChain()
+ static bool g_shouldPrecompilePipelines;
+ static std::atomic<bool> g_executedCommandList;
+ 
++void Video::ReportLoadingDiagnostics()
++{
++#ifdef UNLEASHED_RECOMP_IOS
++    // Called by the main event loop; no guest pointers or render-owned frame
++    // state are read here. Even a stopped guest therefore leaves evidence.
++    using Clock = std::chrono::steady_clock;
++    static std::atomic<int64_t> nextReportMs;
++    const auto now = Clock::now();
++    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++        now.time_since_epoch()).count();
++    int64_t expectedReportMs = nextReportMs.load(std::memory_order_relaxed);
++    if (nowMs < expectedReportMs || !nextReportMs.compare_exchange_strong(
++        expectedReportMs, nowMs + 5000, std::memory_order_relaxed))
++        return;
++
++    std::string unresolved;
++    uint32_t unresolvedCount;
++    int64_t sampleAgeMs = -1;
++    {
++        std::lock_guard lock(g_loadingDiagnosticMutex);
++        unresolved = g_unresolvedPipelineDiagnostic;
++        unresolvedCount = g_unresolvedPipelineDiagnosticCount;
++        if (g_unresolvedPipelineDiagnosticTime != Clock::time_point{})
++            sampleAgeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++                now - g_unresolvedPipelineDiagnosticTime).count();
++    }
++
++    LOGFN("IOS-LOADING progress present={}/{} commandLists={} pendingTasks={} compilingTasks={} pipelineQueued={} pipelineStarted={} pipelineCompleted={} pipelineActive={} exitLoading={}/{} commandsReady={} executed={} suspended={} unresolved={} sampleAgeMs={}",
++        g_diagnosticPresentCompleted.load(std::memory_order_relaxed),
++        g_diagnosticPresentStarted.load(std::memory_order_relaxed),
++        g_diagnosticCommandListsCompleted.load(std::memory_order_relaxed),
++        g_pendingPipelineTaskCount.load(std::memory_order_relaxed),
++        g_compilingPipelineTaskCount.load(std::memory_order_relaxed),
++        g_diagnosticPipelineQueued.load(std::memory_order_relaxed),
++        g_diagnosticPipelineStarted.load(std::memory_order_relaxed),
++        g_diagnosticPipelineCompleted.load(std::memory_order_relaxed),
++        g_diagnosticPipelineActive.load(std::memory_order_relaxed),
++        g_diagnosticExitLoadingEntered.load(std::memory_order_relaxed),
++        g_diagnosticExitLoadingActive.load(std::memory_order_relaxed),
++        g_readyForCommands.load(std::memory_order_relaxed),
++        g_executedCommandList.load(std::memory_order_relaxed),
++        g_appSuspended.load(std::memory_order_relaxed), unresolvedCount, sampleAgeMs);
++    if (!unresolved.empty())
++        LOGFN("IOS-LOADING unresolved (up to 8 names): {}", unresolved);
++#endif
++}
++
+ void Video::Present()
+ {
++#ifdef UNLEASHED_RECOMP_IOS
++    g_diagnosticPresentStarted.fetch_add(1, std::memory_order_relaxed);
++#endif
+     g_readyForCommands = false;
+ 
+     RenderCommand cmd;
+@@ -2971,6 +3043,9 @@ void Video::Present()
+     }
+ 
+     g_presentProfiler.Reset();
++#ifdef UNLEASHED_RECOMP_IOS
++    g_diagnosticPresentCompleted.fetch_add(1, std::memory_order_relaxed);
++#endif
+ }
+ 
+ void Video::StartPipelinePrecompilation()
+@@ -3092,6 +3167,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+ 
+     g_executedCommandList = true;
+     g_executedCommandList.notify_one();
++#ifdef UNLEASHED_RECOMP_IOS
++    g_diagnosticCommandListsCompleted.fetch_add(1, std::memory_order_relaxed);
++#endif
+ }
+ 
+ static void ProcBeginCommandList(const RenderCommand& cmd)
+@@ -6398,6 +6476,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+ #endif
+ )
+ {
++#ifdef UNLEASHED_RECOMP_IOS
++    g_diagnosticPipelineStarted.fetch_add(1, std::memory_order_relaxed);
++    g_diagnosticPipelineActive.fetch_add(1, std::memory_order_relaxed);
++#endif
+     auto pipeline = CreateGraphicsPipeline(pipelineState);
+ #ifdef ASYNC_PSO_DEBUG
+     pipeline->setName(pipelineName);
+@@ -6409,6 +6491,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+     cmd.addPipeline.hash = pipelineHash;
+     cmd.addPipeline.pipeline = pipeline.release();
+     g_renderQueue.enqueue(cmd);
++#ifdef UNLEASHED_RECOMP_IOS
++    g_diagnosticPipelineCompleted.fetch_add(1, std::memory_order_relaxed);
++    g_diagnosticPipelineActive.fetch_sub(1, std::memory_order_relaxed);
++#endif
+ }
+ 
+ static void PipelineCompilerThread()
+@@ -6514,6 +6600,9 @@ static void EnqueueGraphicsPipelineCompilation(
+             queueItem.token = tokenPair.sharedToken;
+ #ifdef ASYNC_PSO_DEBUG
+             queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
++#endif
++#ifdef UNLEASHED_RECOMP_IOS
++            g_diagnosticPipelineQueued.fetch_add(1, std::memory_order_relaxed);
+ #endif
+             g_pipelineStateQueue.enqueue(queueItem);
+         }
+@@ -7086,27 +7175,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -247,6 +361,12 @@ index 0205276..bd01f34 100644
  {
 +#ifndef UNLEASHED_RECOMP_IOS
      assert(std::this_thread::get_id() == g_mainThreadId);
++#else
++    g_diagnosticExitLoadingEntered.fetch_add(1, std::memory_order_relaxed);
++    g_diagnosticExitLoadingActive.fetch_add(1, std::memory_order_relaxed);
++    LOGFN("IOS-LOADING ExitLoading entered pendingTasks={} compilingTasks={}",
++        g_pendingPipelineTaskCount.load(std::memory_order_relaxed),
++        g_compilingPipelineTaskCount.load(std::memory_order_relaxed));
 +#endif
  
      // Wait for pipeline compilations to finish.
@@ -278,8 +398,88 @@ index 0205276..bd01f34 100644
 +#endif
 +
      __imp__sub_825369A0(ctx, base);
++#ifdef UNLEASHED_RECOMP_IOS
++    g_diagnosticExitLoadingActive.fetch_sub(1, std::memory_order_relaxed);
++    LOGN("IOS-LOADING ExitLoading returned.");
++#endif
  }
  
+ // CModelData::CheckMadeAll
+@@ -7273,6 +7392,9 @@ static void PipelineTaskConsumerThread()
+ 
+     std::vector<PipelineTask> localPipelineTaskQueue;
+     std::unique_ptr<GuestThreadContext> ctx;
++#ifdef UNLEASHED_RECOMP_IOS
++    std::chrono::steady_clock::time_point nextUnresolvedSample;
++#endif
+ 
+     while (true)
+     {
+@@ -7291,6 +7413,12 @@ static void PipelineTaskConsumerThread()
+         }
+ 
+         bool allHandled = true;
++#ifdef UNLEASHED_RECOMP_IOS
++        const auto diagnosticNow = std::chrono::steady_clock::now();
++        const bool sampleUnresolved = diagnosticNow >= nextUnresolvedSample;
++        uint32_t unresolvedCount = 0;
++        std::string unresolvedSummary;
++#endif
+ 
+         for (auto& [type, databaseData] : localPipelineTaskQueue)
+         {
+@@ -7358,6 +7486,21 @@ static void PipelineTaskConsumerThread()
+                 else
+                 {
+                     allHandled = false;
++#ifdef UNLEASHED_RECOMP_IOS
++                    if (sampleUnresolved)
++                    {
++                        ++unresolvedCount;
++                        if (unresolvedCount <= 8)
++                        {
++                            const char* name = databaseData->m_TypeAndName.c_str();
++                            unresolvedSummary += fmt::format(
++                                "{}name={} flags=0x{:02X} vtable=0x{:08X}",
++                                unresolvedSummary.empty() ? "" : "; ",
++                                std::string_view(name ? name : "<null>").substr(0, 128),
++                                uint32_t(databaseData->m_Flags), uint32_t(databaseData->m_pVftable.ptr));
++                        }
++                    }
++#endif
+                 }
+ 
+                 break;
+@@ -7515,6 +7658,17 @@ static void PipelineTaskConsumerThread()
+             }
+         }
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++        if (sampleUnresolved)
++        {
++            nextUnresolvedSample = diagnosticNow + std::chrono::seconds(5);
++            std::lock_guard lock(g_loadingDiagnosticMutex);
++            g_unresolvedPipelineDiagnostic = std::move(unresolvedSummary);
++            g_unresolvedPipelineDiagnosticCount = unresolvedCount;
++            g_unresolvedPipelineDiagnosticTime = diagnosticNow;
++        }
++#endif
++
+         if (allHandled)
+             localPipelineTaskQueue.clear();
+ 
+diff --git a/UnleashedRecomp/gpu/video.h b/UnleashedRecomp/gpu/video.h
+index 80a0b21..9fe9378 100644
+--- a/UnleashedRecomp/gpu/video.h
++++ b/UnleashedRecomp/gpu/video.h
+@@ -23,6 +23,7 @@ struct Video
+     static void HandleApplicationBackgroundState(bool isBackgrounded);
+     static void Present();
+     static void StartPipelinePrecompilation();
++    static void ReportLoadingDiagnostics();
+     static void WaitForGPU();
+     static void ComputeViewportDimensions();
+ };
 diff --git a/UnleashedRecomp/hid/driver/sdl_hid.cpp b/UnleashedRecomp/hid/driver/sdl_hid.cpp
 index 7623552..f4df262 100644
 --- a/UnleashedRecomp/hid/driver/sdl_hid.cpp
@@ -405,16 +605,102 @@ index d61131f..1101524 100644
      void SetProhibitedInputs(uint16_t wButtons = 0, bool leftStick = false, bool rightStick = false);
      bool IsInputAllowed();
      bool IsInputDeviceController();
+diff --git a/UnleashedRecomp/kernel/io/file_system.cpp b/UnleashedRecomp/kernel/io/file_system.cpp
+index a765d12..02dcacd 100644
+--- a/UnleashedRecomp/kernel/io/file_system.cpp
++++ b/UnleashedRecomp/kernel/io/file_system.cpp
+@@ -8,6 +8,50 @@
+ #include <user/config.h>
+ #include <stdafx.h>
+ 
++#if defined(UNLEASHED_RECOMP_IOS)
++#include <cerrno>
++#include <unordered_set>
++
++static void LogIOSFileOpen(const std::string_view requestedPath,
++    const std::filesystem::path& resolvedPath, bool succeeded, int openErrno)
++{
++    if (succeeded)
++    {
++        const size_t splitMarker = requestedPath.rfind(".ar.");
++        const bool isArchiveSplit = splitMarker != std::string_view::npos &&
++            requestedPath.size() == splitMarker + 6 &&
++            requestedPath[splitMarker + 4] >= '0' && requestedPath[splitMarker + 4] <= '9' &&
++            requestedPath[splitMarker + 5] >= '0' && requestedPath[splitMarker + 5] <= '9';
++        if (!isArchiveSplit && !requestedPath.ends_with(".ar") &&
++            !requestedPath.ends_with(".arl") && !requestedPath.ends_with(".sfd"))
++            return;
++    }
++
++    static std::mutex logMutex;
++    static std::unordered_set<std::string> failedPaths;
++    static std::unordered_set<std::string> openedArchivePaths;
++    {
++        std::lock_guard lock(logMutex);
++        auto& paths = succeeded ? openedArchivePaths : failedPaths;
++        if (paths.size() >= 64 || !paths.emplace(requestedPath).second)
++            return;
++    }
++
++    // Logging can take its own locks; never call it while holding logMutex.
++    const auto hostPath = resolvedPath.u8string();
++    if (succeeded)
++    {
++        LOGF_IMPL(Utility, "iOS File I/O", "Opened archive/movie: guest=\"{}\" host=\"{}\"",
++            requestedPath, reinterpret_cast<const char*>(hostPath.c_str()));
++    }
++    else
++    {
++        LOGF_IMPL(Warning, "iOS File I/O", "File open failed: guest=\"{}\" host=\"{}\" errno={}",
++            requestedPath, reinterpret_cast<const char*>(hostPath.c_str()), openErrno);
++    }
++}
++#endif
++
+ struct FileHandle : KernelObject
+ {
+     std::fstream stream;
+@@ -107,14 +151,26 @@ FileHandle* XCreateFileA
+     }
+ 
+     fileStream.open(filePath, fileOpenMode);
++#if defined(UNLEASHED_RECOMP_IOS)
++    const int fileOpenErrno = errno;
++#endif
+     if (!fileStream.is_open())
+     {
++#if defined(UNLEASHED_RECOMP_IOS)
++        LogIOSFileOpen(lpFileName, filePath, false, fileOpenErrno);
++        errno = fileOpenErrno;
++#endif
+ #ifdef _WIN32
+         GuestThread::SetLastError(GetLastError());
+ #endif
+         return GetInvalidKernelObject<FileHandle>();
+     }
+ 
++#if defined(UNLEASHED_RECOMP_IOS)
++    LogIOSFileOpen(lpFileName, filePath, true, fileOpenErrno);
++    errno = fileOpenErrno;
++#endif
++
+     FileHandle *fileHandle = CreateKernelObject<FileHandle>();
+     fileHandle->stream = std::move(fileStream);
+     fileHandle->path = std::move(filePath);
 diff --git a/UnleashedRecomp/main.cpp b/UnleashedRecomp/main.cpp
-index e34d7e1..25a6ad5 100644
+index e34d7e1..5677141 100644
 --- a/UnleashedRecomp/main.cpp
 +++ b/UnleashedRecomp/main.cpp
-@@ -213,6 +213,16 @@ int main(int argc, char *argv[])
+@@ -213,6 +213,20 @@ int main(int argc, char *argv[])
  
      os::logger::Init();
  
 +#ifdef UNLEASHED_RECOMP_IOS
 +    LOGN("iOS startup: native fullscreen, threaded guest, condition-variable waits.");
++    LOGFN("iOS startup: game data root={}", GetGamePath().string());
++#ifdef UNLEASHED_RECOMP_DAY_STAGE_ARCADE
++    LOGN("iOS startup: Day-Stage Arcade enabled; bundled GameData required.");
++#endif
 +#endif
 +
 +    if (!SeedBundledSaveData())
@@ -426,7 +712,7 @@ index e34d7e1..25a6ad5 100644
  #if TARGET_OS_IOS
      if (!apple::SupportsBCTextures()) {
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_iOS_UnsupportedGPU_BCTextures").c_str(), GameWindow::s_pWindow);
-@@ -354,6 +364,9 @@ int main(int argc, char *argv[])
+@@ -354,6 +368,9 @@ int main(int argc, char *argv[])
  
      std::filesystem::path modulePath;
      bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
@@ -436,7 +722,7 @@ index e34d7e1..25a6ad5 100644
      bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
      if (runInstallerWizard)
      {
-@@ -370,13 +383,22 @@ int main(int argc, char *argv[])
+@@ -370,13 +387,22 @@ int main(int argc, char *argv[])
      }
  
      ModLoader::Init();
@@ -459,7 +745,7 @@ index e34d7e1..25a6ad5 100644
  
      if (!runInstallerWizard)
      {
-@@ -387,9 +409,30 @@ int main(int argc, char *argv[])
+@@ -387,9 +413,31 @@ int main(int argc, char *argv[])
          }
      }
  
@@ -482,6 +768,7 @@ index e34d7e1..25a6ad5 100644
 +        SDL_PumpEvents();
 +        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 +        GameWindow::Update();
++        Video::ReportLoadingDiagnostics();
 +        SDL_Delay(1);
 +    }
 +#else
@@ -491,10 +778,10 @@ index e34d7e1..25a6ad5 100644
      return 0;
  }
 diff --git a/UnleashedRecomp/mod/mod_loader.cpp b/UnleashedRecomp/mod/mod_loader.cpp
-index 804cc2f..d838f2f 100644
+index 804cc2f..a2b05ea 100644
 --- a/UnleashedRecomp/mod/mod_loader.cpp
 +++ b/UnleashedRecomp/mod/mod_loader.cpp
-@@ -94,13 +94,15 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
+@@ -94,19 +94,25 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
  void ModLoader::Init()
  {
      const std::filesystem::path& userPath = GetUserPath();
@@ -512,7 +799,17 @@ index 804cc2f..d838f2f 100644
              return;
      }
  
-@@ -128,8 +130,13 @@ void ModLoader::Init()
+     if (!configIni.getBool("CPKREDIR", "Enabled", true))
+         return;
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    LOGFN("iOS mods: using config {}", configIniPath.string());
++#endif
++
+     if (configIni.getBool("CPKREDIR", "EnableSaveFileRedirection", false))
+     {
+         std::string saveFilePathU8 = configIni.getString("CPKREDIR", "SaveFileFallback", "");
+@@ -128,8 +134,13 @@ void ModLoader::Init()
      if (modsDbIniFilePathU8.empty())
          return;
  
@@ -527,7 +824,7 @@ index 804cc2f..d838f2f 100644
          return;
  
      bool foundModSaveFilePath = false;
-@@ -146,6 +153,8 @@ void ModLoader::Init()
+@@ -146,6 +157,8 @@ void ModLoader::Init()
              continue;
  
          std::filesystem::path modIniFilePath(std::u8string_view((const char8_t*)modIniFilePathU8.c_str()));
@@ -536,6 +833,97 @@ index 804cc2f..d838f2f 100644
  
          IniFile modIni;
          if (!modIni.read(modIniFilePath))
+@@ -214,7 +227,13 @@ void ModLoader::Init()
+         }
+ 
+         if (!mod.includeDirs.empty())
++        {
++#ifdef UNLEASHED_RECOMP_IOS
++            LOGFN("iOS mods: loaded {} from {} ({} include directories)",
++                modId, modIniFilePath.string(), mod.includeDirs.size());
++#endif
+             g_mods.emplace_back(std::move(mod));
++        }
+     }
+ 
+     auto codeCount = modsDbIni.get<size_t>("Codes", "CodeCount", 0);
+diff --git a/UnleashedRecomp/os/macos/logger_macos.cpp b/UnleashedRecomp/os/macos/logger_macos.cpp
+index 8a284b9..84292cf 100644
+--- a/UnleashedRecomp/os/macos/logger_macos.cpp
++++ b/UnleashedRecomp/os/macos/logger_macos.cpp
+@@ -1,21 +1,70 @@
+ #include <os/logger.h>
+ #if TARGET_OS_IPHONE
+ #include <os/log.h>
++#include <user/paths.h>
++#include <cstdio>
++#include <mutex>
++
++namespace
++{
++    std::mutex g_diagnosticMutex;
++    FILE* g_diagnosticFile = nullptr;
++    size_t g_diagnosticBytes = 0;
++    constexpr size_t DiagnosticLimit = 4 * 1024 * 1024;
++}
+ #endif
+ void os::logger::Init()
+ {
++#if TARGET_OS_IPHONE
++    // Unified logging may discard messages during startup. Keep a bounded,
++    // app-owned copy retrievable through Files/AFC, including Metal's stderr.
++    std::lock_guard lock(g_diagnosticMutex);
++    const auto& directory = GetUserPath();
++    std::error_code ec;
++    std::filesystem::create_directories(directory, ec);
++    if (ec)
++        return;
++
++    for (const char* name : { "Sonic-Unleashed-diagnostic.log", "Sonic-Unleashed-stderr.log" })
++    {
++        const auto path = directory / name;
++        if (std::filesystem::is_regular_file(path, ec))
++            std::filesystem::copy_file(path, path.string() + ".previous",
++                std::filesystem::copy_options::overwrite_existing, ec);
++        ec.clear();
++    }
++
++    g_diagnosticFile = std::fopen((directory / "Sonic-Unleashed-diagnostic.log").c_str(), "w");
++    g_diagnosticBytes = 0;
++    if (std::freopen((directory / "Sonic-Unleashed-stderr.log").c_str(), "w", stderr))
++        std::setvbuf(stderr, nullptr, _IONBF, 0);
++#endif
+ }
+ 
+ void os::logger::Log(const std::string_view str, ELogType type, const char* func)
+ {
+     #if TARGET_OS_IPHONE
++        {
++            std::lock_guard lock(g_diagnosticMutex);
++            if (g_diagnosticFile && g_diagnosticBytes < DiagnosticLimit)
++            {
++                const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
++                    std::chrono::steady_clock::now().time_since_epoch()).count();
++                const int count = std::fprintf(g_diagnosticFile, "%lld [%d] %s: %.*s\n",
++                    static_cast<long long>(milliseconds), static_cast<int>(type),
++                    func ? func : "*", static_cast<int>(str.size()), str.data());
++                if (count > 0)
++                    g_diagnosticBytes += static_cast<size_t>(count);
++                std::fflush(g_diagnosticFile);
++            }
++        }
+         if (func)
+         {
+-            os_log(OS_LOG_DEFAULT, "%{public}s: %{public}s", func, str.data());
++            os_log(OS_LOG_DEFAULT, "%{public}s: %{public}.*s", func, static_cast<int>(str.size()), str.data());
+         }
+         else
+         {
+-            os_log(OS_LOG_DEFAULT, "%{public}s", str.data());
++            os_log(OS_LOG_DEFAULT, "%{public}.*s", static_cast<int>(str.size()), str.data());
+         }
+     #else
+         if (func)
 diff --git a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
 index 61ac40d..7ce5844 100644
 --- a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
@@ -896,7 +1284,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..ce05700 100644
+index d9130f4..d686b02 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -904,7 +1292,7 @@ index d9130f4..ce05700 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=4
++VERSION_REVISION=5
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -1866,26 +2254,6 @@ index d5c0858..78375f2 100644
  add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/o1heap")
  add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL")
  add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL_mixer")
-Submodule thirdparty/plume contains modified content
-diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
-index 2abe67c..2a914ad 100644
---- a/thirdparty/plume/plume_metal.cpp
-+++ b/thirdparty/plume/plume_metal.cpp
-@@ -3796,7 +3796,14 @@ namespace plume {
- 
-         const std::string deviceName(mtl->name()->utf8String());
-         description.name = deviceName;
-+#if PLUME_IOS
-+        // MTLDevice.location is a macOS-only selector. iPhone and iPad GPUs are
-+        // integrated, so classify them directly instead of messaging an
-+        // unavailable selector and aborting during launch.
-+        description.type = RenderDeviceType::INTEGRATED;
-+#else
-         description.type = mapDeviceType(mtl->location());
-+#endif
-         description.driverVersion = 1; // Unavailable
-         description.vendor = mtl->supportsFamily(MTL::GPUFamilyApple1) ? RenderDeviceVendor::APPLE : getRenderDeviceVendor(mtl->registryID());
-         description.dedicatedVideoMemory = mtl->recommendedMaxWorkingSetSize();
 diff --git a/tools/bundle_ios_game_data.py b/tools/bundle_ios_game_data.py
 new file mode 100644
 index 0000000..f35de67
@@ -2141,3 +2509,43 @@ index 0000000..3a66070
 +fi
 +
 +printf '%s\n' "$IPA_PATH"
+diff --git a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
+index 59e2d07..b9dfd5e 100644
+--- a/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
++++ b/UnleashedRecomp/api/SWA/HUD/Sonic/HudSonicStage.h
+@@ -12,11 +12,15 @@ namespace SWA
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcSpeedGauge;
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcRingEnergyGauge;
+         Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcGaugeFrame;
+-        SWA_INSERT_PADDING(0x28);
++        Chao::CSD::RCPtr<Chao::CSD::CScene> m_rcExpCount;
++        SWA_INSERT_PADDING(0x20);
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcScoreCount;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount2;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcTimeCount3;
+         Chao::CSD::RCPtr<Chao::CSD::CNode> m_rcPlayerCount;
+     };
++
++    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcExpCount, 0x100);
++    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
+ }
+diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
+index 2abe67c..2a914ad 100644
+--- a/thirdparty/plume/plume_metal.cpp
++++ b/thirdparty/plume/plume_metal.cpp
+@@ -3796,7 +3796,14 @@ namespace plume {
+ 
+         const std::string deviceName(mtl->name()->utf8String());
+         description.name = deviceName;
++#if PLUME_IOS
++        // MTLDevice.location is a macOS-only selector. iPhone and iPad GPUs are
++        // integrated, so classify them directly instead of messaging an
++        // unavailable selector and aborting during launch.
++        description.type = RenderDeviceType::INTEGRATED;
++#else
+         description.type = mapDeviceType(mtl->location());
++#endif
+         description.driverVersion = 1; // Unavailable
+         description.vendor = mtl->supportsFamily(MTL::GPUFamilyApple1) ? RenderDeviceVendor::APPLE : getRenderDeviceVendor(mtl->registryID());
+         description.dedicatedVideoMemory = mtl->recommendedMaxWorkingSetSize();

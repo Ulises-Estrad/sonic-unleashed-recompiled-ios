@@ -11,6 +11,12 @@ commit `5d5adbc7e6953990be3184e8614787d93940b713` on its `ios` branch.
 
 ## Download
 
+**Runtime testing is incomplete.** Version 1.0.4 reaches the intro screens
+but remains at Now Loading on the owner's iPhone. The arcade flow and
+background/resume behavior are not yet verified in gameplay. Version 1.0.5
+adds persistent loading diagnostics; it is not a confirmed loading fix.
+Never install a `compiled-ios-*` release: those are code-only intermediates.
+
 Private release:
 [`day-stage-arcade-v1`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/day-stage-arcade-v1)
 
@@ -29,9 +35,9 @@ caused the earlier build to abort immediately after launch.
 
 The iOS runtime uses a native fullscreen launch configuration and keeps the
 UIKit/SDL event pump on the main thread while the recompiled game runs on a
-worker. Backgrounding therefore suspends rendering cleanly, and reopening the
-still-resident app continues from where it was left. If iOS has evicted the app
-from memory, opening it performs a normal cold start.
+worker. Background/resume handling is implemented but still needs device
+validation once the loading blocker is resolved. The intended behavior is to
+continue a resident app and cold-start one evicted from memory.
 
 ## Arcade edition
 

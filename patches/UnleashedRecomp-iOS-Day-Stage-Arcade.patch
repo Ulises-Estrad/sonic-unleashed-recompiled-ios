@@ -1,5 +1,5 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..8a8248e 100644
+index 6f3a2e7..1918a8f 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
 @@ -1,5 +1,11 @@
@@ -22,7 +22,7 @@ index 6f3a2e7..8a8248e 100644
      "ui/tv_static.cpp"
  )
  
-@@ -332,7 +339,10 @@ elseif(APPLE)
+@@ -332,15 +339,18 @@ elseif(APPLE)
          OUTPUT_VAR MACOS_BUNDLE_VERSION
      )
  
@@ -34,6 +34,16 @@ index 6f3a2e7..8a8248e 100644
  
      if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
          add_executable(UnleashedRecomp MACOSX_BUNDLE ${UNLEASHED_RECOMP_CXX_SOURCES})
+         set_target_properties(UnleashedRecomp PROPERTIES
+-            OUTPUT_NAME "Unleashed Recompiled iOS"
++            OUTPUT_NAME "Sonic Unleashed"
+             MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/ios/iOSBundleInfo.plist.in
+             MACOSX_BUNDLE_GUI_IDENTIFIER hedge-dev.UnleashedRecomp.iOS
+-            MACOSX_BUNDLE_BUNDLE_NAME "Unleashed Recompiled"
++            MACOSX_BUNDLE_BUNDLE_NAME "Sonic Unleashed"
+             MACOSX_BUNDLE_BUNDLE_VERSION ${IOS_BUNDLE_VERSION}
+             MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
+             XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
 @@ -485,10 +495,15 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
@@ -667,11 +677,22 @@ index 0000000..736b084
 +}
 +}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-index 817db38..08a7b4b 100644
+index 817db38..680438a 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 +++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-@@ -13,12 +13,16 @@
-         <string>Unleashed Recompiled</string>
+@@ -6,28 +6,73 @@
+         <key>CFBundleDevelopmentRegion</key>
+         <string>en</string>
+         <key>CFBundleExecutable</key>
+-        <string>Unleashed Recompiled iOS</string>
++        <string>Sonic Unleashed</string>
+         <key>CFBundleIdentifier</key>
+         <string>hedge-dev.UnleashedRecomp</string>
++        <key>CFBundleInfoDictionaryVersion</key>
++        <string>6.0</string>
+         <key>CFBundleName</key>
+-        <string>Unleashed Recompiled</string>
++        <string>Sonic Unleashed</string>
          <key>CFBundlePackageType</key>
          <string>APPL</string>
 +        <key>CFBundleSupportedPlatforms</key>
@@ -688,6 +709,57 @@ index 817db38..08a7b4b 100644
          <key>UIDeviceFamily</key>
          <array>
              <integer>1</integer>
+             <integer>2</integer>
+         </array>
+         <key>CFBundleDisplayName</key>
+-        <string>Unleashed Recompiled</string>
+-        <key>CFBundleIconName</key>
+-        <string>AppIcon</string>
++        <string>Sonic Unleashed</string>
++        <key>CFBundleIconFiles</key>
++        <array>
++            <string>Icon-20</string>
++            <string>Icon-29</string>
++            <string>Icon-40</string>
++            <string>Icon-60</string>
++            <string>Icon-76</string>
++        </array>
++        <key>CFBundleIcons</key>
++        <dict>
++            <key>CFBundlePrimaryIcon</key>
++            <dict>
++                <key>CFBundleIconFiles</key>
++                <array>
++                    <string>Icon-20</string>
++                    <string>Icon-29</string>
++                    <string>Icon-40</string>
++                    <string>Icon-60</string>
++                </array>
++            </dict>
++        </dict>
++        <key>CFBundleIcons~ipad</key>
++        <dict>
++            <key>CFBundlePrimaryIcon</key>
++            <dict>
++                <key>CFBundleIconFiles</key>
++                <array>
++                    <string>Icon-20</string>
++                    <string>Icon-29</string>
++                    <string>Icon-40</string>
++                    <string>Icon-76</string>
++                    <string>Icon-83.5</string>
++                </array>
++            </dict>
++        </dict>
++        <key>LSRequiresIPhoneOS</key>
++        <true />
++        <key>UIRequiredDeviceCapabilities</key>
++        <array>
++            <string>arm64</string>
++        </array>
+         <key>UIFileSharingEnabled</key>
+         <true />
+         <key>LSSupportsOpeningDocumentsInPlace</key>
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..1db712d 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -1592,6 +1664,26 @@ index d5c0858..78375f2 100644
  add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/o1heap")
  add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL")
  add_subdirectory("${UNLEASHED_RECOMP_THIRDPARTY_ROOT}/SDL_mixer")
+Submodule thirdparty/plume contains modified content
+diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
+index 2abe67c..2a914ad 100644
+--- a/thirdparty/plume/plume_metal.cpp
++++ b/thirdparty/plume/plume_metal.cpp
+@@ -3796,7 +3796,14 @@ namespace plume {
+ 
+         const std::string deviceName(mtl->name()->utf8String());
+         description.name = deviceName;
++#if PLUME_IOS
++        // MTLDevice.location is a macOS-only selector. iPhone and iPad GPUs are
++        // integrated, so classify them directly instead of messaging an
++        // unavailable selector and aborting during launch.
++        description.type = RenderDeviceType::INTEGRATED;
++#else
+         description.type = mapDeviceType(mtl->location());
++#endif
+         description.driverVersion = 1; // Unavailable
+         description.vendor = mtl->supportsFamily(MTL::GPUFamilyApple1) ? RenderDeviceVendor::APPLE : getRenderDeviceVendor(mtl->registryID());
+         description.dedicatedVideoMemory = mtl->recommendedMaxWorkingSetSize();
 diff --git a/tools/bundle_ios_game_data.py b/tools/bundle_ios_game_data.py
 new file mode 100644
 index 0000000..f35de67
@@ -1704,21 +1796,22 @@ index 0000000..f35de67
 +    main()
 diff --git a/tools/package_ios_ipa.sh b/tools/package_ios_ipa.sh
 new file mode 100755
-index 0000000..6e5eaf0
+index 0000000..3a66070
 --- /dev/null
 +++ b/tools/package_ios_ipa.sh
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,139 @@
 +#!/usr/bin/env bash
 +set -euo pipefail
 +
 +ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 +BUILD_DIR="$ROOT/out/build/ios-device-release"
 +STAGING_DIR="$ROOT/out/ipa-staging"
-+APP_PATH="$BUILD_DIR/UnleashedRecomp/Unleashed Recompiled iOS.app"
-+IPA_PATH="$ROOT/out/Unleashed-DualSense-Touch.ipa"
++APP_PATH="$BUILD_DIR/UnleashedRecomp/Sonic Unleashed.app"
++IPA_PATH="$ROOT/out/Sonic-Unleashed.ipa"
++ICON_SOURCE="$ROOT/UnleashedRecompResources/images/game_icon.png"
 +JOBS="${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || printf '8')}"
 +
-+for tool in cmake python3 zip; do
++for tool in cmake python3 sips zip; do
 +    if ! command -v "$tool" >/dev/null 2>&1; then
 +        printf 'Required build tool is missing: %s\n' "$tool" >&2
 +        exit 1
@@ -1768,6 +1861,35 @@ index 0000000..6e5eaf0
 +cp -R "$APP_PATH" "$STAGING_DIR/Payload/"
 +
 +STAGED_APP="$STAGING_DIR/Payload/$(basename "$APP_PATH")"
++
++if [[ ! -f "$ICON_SOURCE" ]]; then
++    printf 'App icon source was not found: %s\n' "$ICON_SOURCE" >&2
++    exit 1
++fi
++
++make_icon() {
++    local filename="$1"
++    local pixels="$2"
++    sips --resampleHeightWidth "$pixels" "$pixels" "$ICON_SOURCE" \
++        --out "$STAGED_APP/$filename" >/dev/null
++}
++
++# Legacy icon files are intentionally generated during packaging so the IPA
++# works without an Xcode asset-catalog project.
++make_icon "Icon-20.png" 20
++make_icon "Icon-20@2x.png" 40
++make_icon "Icon-20@3x.png" 60
++make_icon "Icon-29.png" 29
++make_icon "Icon-29@2x.png" 58
++make_icon "Icon-29@3x.png" 87
++make_icon "Icon-40.png" 40
++make_icon "Icon-40@2x.png" 80
++make_icon "Icon-40@3x.png" 120
++make_icon "Icon-60@2x.png" 120
++make_icon "Icon-60@3x.png" 180
++make_icon "Icon-76.png" 76
++make_icon "Icon-76@2x.png" 152
++make_icon "Icon-83.5@2x.png" 167
 +
 +if [[ "${BUNDLE_GAME_DATA:-0}" == "1" ]]; then
 +    if [[ -z "${GAME_DATA_ROOT:-}" ]]; then

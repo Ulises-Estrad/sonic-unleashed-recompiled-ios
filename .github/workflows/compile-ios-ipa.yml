@@ -18,7 +18,7 @@ jobs:
       INPUT_TAG: private-build-inputs-v1
       SOURCE_COMMIT: 5d5adbc7e6953990be3184e8614787d93940b713
       SOURCE_REPOSITORY: https://github.com/Markos-Th09/UnleashedRecomp.git
-      IPA_NAME: Unleashed-Day-Stage-Arcade-Compiled.ipa
+      IPA_NAME: Sonic-Unleashed-Compiled.ipa
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -65,9 +65,30 @@ jobs:
           GAME_DATA_ROOT="$RUNNER_TEMP/userdata" \
           JOBS="$(sysctl -n hw.logicalcpu)" \
             ./tools/package_ios_ipa.sh
-          test -s out/Unleashed-DualSense-Touch.ipa
-          unzip -tq out/Unleashed-DualSense-Touch.ipa
-          mv out/Unleashed-DualSense-Touch.ipa "out/$IPA_NAME"
+          test -s out/Sonic-Unleashed.ipa
+          unzip -tq out/Sonic-Unleashed.ipa
+          python3 - <<'PY'
+          import plistlib
+          import zipfile
+
+          ipa = "out/Sonic-Unleashed.ipa"
+          prefix = "Payload/Sonic Unleashed.app/"
+          icons = {
+              "Icon-20.png", "Icon-20@2x.png", "Icon-20@3x.png",
+              "Icon-29.png", "Icon-29@2x.png", "Icon-29@3x.png",
+              "Icon-40.png", "Icon-40@2x.png", "Icon-40@3x.png",
+              "Icon-60@2x.png", "Icon-60@3x.png", "Icon-76.png",
+              "Icon-76@2x.png", "Icon-83.5@2x.png",
+          }
+          with zipfile.ZipFile(ipa) as archive:
+              info = plistlib.loads(archive.read(prefix + "Info.plist"))
+              assert info["CFBundleDisplayName"] == "Sonic Unleashed"
+              assert info["CFBundleExecutable"] == "Sonic Unleashed"
+              assert prefix + "Sonic Unleashed" in archive.namelist()
+              missing = sorted(prefix + icon for icon in icons if prefix + icon not in archive.namelist())
+              assert not missing, f"Missing app icons: {missing}"
+          PY
+          mv out/Sonic-Unleashed.ipa "out/$IPA_NAME"
           shasum -a 256 "out/$IPA_NAME" > "out/$IPA_NAME.sha256"
 
       - name: Publish compiled IPA for local data injection
@@ -76,10 +97,11 @@ jobs:
           set -euo pipefail
           RELEASE_TAG="compiled-ios-${GITHUB_RUN_NUMBER}"
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          Compiled unsigned arm64 iOS app for the private Day-Stage Arcade
-          edition. It includes the title-to-selector flow, arcade gameplay
-          patches, DualSense-style touch controls, automatic DualSense/touch
-          handoff, and bundled-data support.
+          Compiled unsigned arm64 iOS app for the private Sonic Unleashed
+          Day-Stage Arcade edition. It includes the iPhone Metal launch fix,
+          Sonic Unleashed app name and icon, title-to-selector flow, arcade
+          gameplay patches, DualSense-style touch controls, automatic
+          DualSense/touch handoff, and bundled-data support.
 
           This intermediate IPA intentionally contains no full game data. The
           owner's local packaging step injects the validated slim data tree and
@@ -90,5 +112,5 @@ jobs:
             "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Compiled Day-Stage Arcade iOS IPA" \
+            --title "Compiled Sonic Unleashed iOS IPA" \
             --notes-file "$RUNNER_TEMP/release-notes.md"

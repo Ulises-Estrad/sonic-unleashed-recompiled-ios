@@ -2585,7 +2585,7 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..c583b43
+index 0000000..d5efae3
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 @@ -0,0 +1,103 @@
@@ -2639,7 +2639,7 @@ index 0000000..c583b43
 +    const uint32_t end = PPC_LOAD_U32(root + 12);
 +    if (!begin || end < begin || end - begin != 9 * 8)
 +    {
-+        LOGFN("Arcade selector: expected nine countries; XML override not active");
++        LOGFN("{}", "Arcade selector: expected nine countries; XML override not active");
 +        return;
 +    }
 +    selectorOwner = owner;

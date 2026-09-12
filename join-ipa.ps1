@@ -1,10 +1,24 @@
 [CmdletBinding()]
 param(
-    [string]$Manifest = (Join-Path $PSScriptRoot 'Unleashed-DualSense-Touch.ipa.manifest.json'),
-    [string]$Output = (Join-Path $PSScriptRoot 'Unleashed-DualSense-Touch.ipa')
+    [string]$Manifest,
+    [string]$Output
 )
 
 $ErrorActionPreference = 'Stop'
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+if ([string]::IsNullOrWhiteSpace($Manifest)) {
+    $Manifest = Join-Path $scriptRoot 'Unleashed-DualSense-Touch.ipa.manifest.json'
+}
+if ([string]::IsNullOrWhiteSpace($Output)) {
+    $Output = Join-Path $scriptRoot 'Unleashed-DualSense-Touch.ipa'
+}
+
+function ConvertTo-HexString {
+    param([byte[]]$Bytes)
+    return [System.BitConverter]::ToString($Bytes).Replace('-', '')
+}
+
 $manifestPath = [System.IO.Path]::GetFullPath($Manifest)
 $partsDirectory = [System.IO.Path]::GetDirectoryName($manifestPath)
 $outputPath = [System.IO.Path]::GetFullPath($Output)
@@ -47,7 +61,7 @@ try {
                 $fullHash.AppendData($buffer, 0, $count)
                 $totalBytes += $count
             }
-            $actualPartHash = [Convert]::ToHexString($partHash.GetHashAndReset())
+            $actualPartHash = ConvertTo-HexString -Bytes ($partHash.GetHashAndReset())
         }
         finally {
             if ($partStream) { $partStream.Dispose() }
@@ -62,7 +76,7 @@ try {
 
     $outputStream.Dispose()
     $outputStream = $null
-    $actualFullHash = [Convert]::ToHexString($fullHash.GetHashAndReset())
+    $actualFullHash = ConvertTo-HexString -Bytes ($fullHash.GetHashAndReset())
 
     if ($totalBytes -ne [int64]$metadata.size) {
         throw 'Reconstructed IPA size does not match the manifest.'

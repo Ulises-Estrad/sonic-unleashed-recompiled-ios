@@ -27,7 +27,7 @@ Private release:
 3. Run this in PowerShell:
 
    ```powershell
-   .\join-ipa.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\join-ipa.ps1
    ```
 
 4. Drag the reconstructed `Unleashed-DualSense-Touch.ipa` into Sideloadly.

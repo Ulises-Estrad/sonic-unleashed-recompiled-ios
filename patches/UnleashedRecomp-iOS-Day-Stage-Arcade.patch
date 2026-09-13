@@ -1218,7 +1218,7 @@ index 61ac40d..05f350b 100644
 +#endif
  }
 diff --git a/UnleashedRecomp/patches/aspect_ratio_patches.cpp b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
-index 02f49ee..5210368 100644
+index 02f49ee..3cf85fa 100644
 --- a/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 +++ b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 @@ -5,6 +5,9 @@
@@ -1242,7 +1242,7 @@ index 02f49ee..5210368 100644
  
  static XXH64_hash_t HashStr(const std::string_view& value)
  {
-@@ -88,6 +95,44 @@ static void EmplacePath(const void* key, const std::string_view& value)
+@@ -88,6 +95,45 @@ static void EmplacePath(const void* key, const std::string_view& value)
  {
      std::lock_guard lock(g_pathMutex);
      g_paths.emplace(key, HashStr(value));
@@ -1259,13 +1259,14 @@ index 02f49ee..5210368 100644
 +    // The arcade selector has no interactive planet backdrop.
 +    if (value.starts_with("ui_worldmap/") &&
 +        (value.find("/worldmap_background") != std::string_view::npos ||
-+         value.starts_with("ui_worldmap/contents/info/") ||
-+         value.starts_with("ui_worldmap/contents/cursor/") ||
-+         value.starts_with("ui_worldmap/contents/active_parts/")))
++         value.starts_with("ui_worldmap/contents/info/")))
 +        g_arcadeHiddenTitlePaths.insert(HashStr(value));
 +    // Keep the native Select prompt; Back is deliberately unavailable here.
 +    if (value.starts_with("ui_worldmap/footer/") &&
-+        (value.ends_with("/btn_B") || value.ends_with("/btn_B_txt") ||
++        (value.ends_with("/btn_X") || value.ends_with("/btn_X_txt") ||
++         value.find("/btn_X/") != std::string_view::npos ||
++         value.find("/btn_X_txt/") != std::string_view::npos ||
++         value.ends_with("/btn_B") || value.ends_with("/btn_B_txt") ||
 +         value.find("/btn_B/") != std::string_view::npos ||
 +         value.find("/btn_B_txt/") != std::string_view::npos))
 +        g_arcadeHiddenTitlePaths.insert(HashStr(value));
@@ -1287,7 +1288,7 @@ index 02f49ee..5210368 100644
  }
  
  static void TraverseCast(Chao::CSD::Scene* scene, uint32_t castNodeIndex, Chao::CSD::CastNode* castNode, uint32_t castIndex, const std::string& parentPath)
-@@ -257,7 +302,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
+@@ -257,7 +303,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
  PPC_FUNC(sub_8258B558)
  {
      auto r3 = ctx.r3;
@@ -1296,7 +1297,7 @@ index 02f49ee..5210368 100644
  
      uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
      if (worldMapSimpleInfo != NULL)
-@@ -355,6 +400,7 @@ enum
+@@ -355,6 +401,7 @@ enum
      CONTROL_TUTORIAL = 1 << 22,
  
      LOADING_ARROW = 1 << 23,
@@ -1304,7 +1305,7 @@ index 02f49ee..5210368 100644
  };
  
  struct CsdModifier
-@@ -801,6 +847,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
+@@ -801,6 +848,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
              return {};
  
          path = findResult->second;
@@ -1317,7 +1318,7 @@ index 02f49ee..5210368 100644
      }
  
      auto findResult = g_modifiers.find(path);
-@@ -1134,6 +1186,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
+@@ -1134,6 +1187,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
          BlackBar::g_loadingBlackBarMax = ImVec2{ position[0], position[1] };
      }
  
@@ -1645,7 +1646,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..aa7a877 100644
+index d9130f4..56fe861 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1653,7 +1654,7 @@ index d9130f4..aa7a877 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=10
++VERSION_REVISION=11
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -2884,10 +2885,10 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..9410b59
+index 0000000..06d96bf
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,456 @@
 +#include <api/SWA.h>
 +#include <cpu/guest_stack_var.h>
 +#include <kernel/function.h>
@@ -2896,6 +2897,8 @@ index 0000000..9410b59
 +#include <ui/arcade_country_caption.h>
 +#include "arcade_selector.h"
 +#include "arcade_native_catalog.h"
++#include <vector>
++#include <algorithm>
 +
 +PPC_FUNC_IMPL(__imp__sub_8258B558);
 +PPC_FUNC_IMPL(__imp__sub_8256E9F0);
@@ -2912,11 +2915,13 @@ index 0000000..9410b59
 +PPC_FUNC_IMPL(__imp__sub_82573AB8);
 +PPC_FUNC_IMPL(__imp__sub_82573C08);
 +PPC_FUNC_IMPL(__imp__sub_8252CCD8);
++PPC_FUNC_IMPL(__imp__sub_82B4E608);
++PPC_FUNC_IMPL(__imp__sub_8256D338);
 +
 +namespace
 +{
-+    // These three RTTI-identified initializers create only the planet, space,
-+    // and globe core decoration. Keep their data/navigation objects alive but
++    // RTTI-identified planet/core initializers create globe decoration.
++    // Keep their data/navigation objects alive but
 +    // do not register their meshes in the render groups. No GPU-wide state,
 +    // asset deletion, or gameplay draw filtering is involved.
 +    thread_local unsigned backdropInitializationDepth = 0;
@@ -2929,17 +2934,23 @@ index 0000000..9410b59
 +
 +PPC_FUNC(sub_82577010)
 +{
++    const uint32_t planet = ctx.r3.u32;
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
 +    const BackdropInitialization scope;
 +    LOGN("Arcade native: isolated globe decoration from stage rendering");
 +#endif
 +    __imp__sub_82577010(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // The main globe is also a CRenderable base embedded at +E4, separately
++    // from the extra meshes registered in this initializer. Its enable byte
++    // is checked by 82E1A4F8. RTTI identifies this exact planet subobject.
++    if (PPC_LOAD_U32(planet + 0xE4) == 0x8203898C)
++        base[planet + 0xE8] = 0;
++#endif
 +}
 +PPC_FUNC(sub_82573AB8)
 +{
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    const BackdropInitialization scope;
-+#endif
++    // Restore the native starfield; only planet/core decoration is suppressed.
 +    __imp__sub_82573AB8(ctx, base);
 +}
 +PPC_FUNC(sub_82573C08)
@@ -3000,6 +3011,9 @@ index 0000000..9410b59
 +    bool insideWorldMap = false;
 +    uint32_t currentCore = 0;
 +    bool isolateWorldMapInput = false;
++    bool insideNativeStageList = false;
++    struct CachedInputSnapshot { uint32_t address; std::array<uint8_t, 0x30> bytes; };
++    std::vector<CachedInputSnapshot> cachedInputs;
 +    SWA::SPadState nativeListPad{};
 +
 +    const ArcadeNative::Stage* FindStage(const char* sequence)
@@ -3100,6 +3114,63 @@ index 0000000..9410b59
 +        ctx = saved;
 +        LOGFN("Arcade native: country {} contains {} day acts", country, kept);
 +    }
++}
++
++PPC_FUNC(sub_8256D338)
++{
++    const uint32_t owner = ctx.r3.u32;
++    __imp__sub_8256D338(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const uint32_t begin = PPC_LOAD_U32(owner + 0x104);
++    const uint32_t end = PPC_LOAD_U32(owner + 0x108);
++    const uint64_t selected = uint64_t(PPC_LOAD_U32(owner + 0x1C)) + PPC_LOAD_U32(owner + 0x20);
++    const uint32_t text = PPC_LOAD_U32(owner + 0xB8);
++    if (!text || !begin || end < begin || selected >= (end - begin) / 0x3C) return;
++    const uint32_t row = begin + uint32_t(selected) * 0x3C;
++    const char* key = GuestString(base, row);
++    if (!key || !std::string_view(key).starts_with("Arcade_")) return;
++    const PPCContext saved = ctx;
++    // 824CD6F8 consumes both string arguments. Clone into raw guest slots,
++    // leaving the row's shared string and our RAII cell string owned normally.
++    guest_stack_var<std::array<uint32_t, 2>> consumed;
++    guest_stack_var<Hedgehog::Base::CSharedString> cell("NameTag");
++    const auto strings = g_memory.MapVirtual(consumed.get());
++    ctx.r3.u32 = strings; ctx.r4.u32 = row;
++    sub_82DFB920(ctx, base);
++    ctx.r3.u32 = strings + 4; ctx.r4.u32 = g_memory.MapVirtual(cell.get());
++    sub_82DFB920(ctx, base);
++    ctx.r3.u32 = text; ctx.r4.u32 = strings; ctx.r5.u32 = strings + 4;
++    sub_824CD6F8(ctx, base);
++    ctx = saved;
++#endif
++}
++
++// Retail menu input is a second, cached ring buffer, not SWA::SPadState.
++// Its five button masks precede the axes (8256D634 repeat / 82571540 tapped).
++PPC_FUNC(sub_82B4E608)
++{
++    __imp__sub_82B4E608(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (!insideWorldMap || !isolateWorldMapInput || !ctx.r3.u32) return;
++    static bool logged = false;
++    if (!logged) { logged = true; LOGN("Arcade native: cached menu input isolated; Back and Pass Time disabled"); }
++    const uint32_t address = ctx.r3.u32;
++    auto entry = std::find_if(cachedInputs.begin(), cachedInputs.end(),
++        [address](const auto& value) { return value.address == address; });
++    if (entry == cachedInputs.end())
++    {
++        CachedInputSnapshot snapshot{address, {}};
++        memcpy(snapshot.bytes.data(), base + address, snapshot.bytes.size());
++        cachedInputs.push_back(snapshot);
++        entry = cachedInputs.end() - 1;
++    }
++    memcpy(base + address, entry->bytes.data(), entry->bytes.size());
++    if (!insideNativeStageList || OptionsMenu::s_isVisible)
++        memset(base + address, 0, entry->bytes.size());
++    else
++        for (unsigned offset = 0; offset < 0x14; offset += 4)
++            PPC_STORE_U32(address + offset, PPC_LOAD_U32(address + offset) & ~0xAu);
++#endif
 +}
 +
 +PPC_FUNC(sub_8251F900)
@@ -3206,6 +3277,9 @@ index 0000000..9410b59
 +    if (pad && isolateWorldMapInput) *pad = {};
 +    insideWorldMap = true;
 +    __imp__sub_8258B558(ctx, base);
++    for (const auto& entry : cachedInputs)
++        memcpy(base + entry.address, entry.bytes.data(), entry.bytes.size());
++    cachedInputs.clear();
 +    insideWorldMap = false;
 +    isolateWorldMapInput = false;
 +    if (pad) *pad = savedPad;
@@ -3243,7 +3317,9 @@ index 0000000..9410b59
 +    auto* pad = input ? &const_cast<SWA::SPadState&>(input->GetPadState()) : nullptr;
 +    const auto saved = pad ? *pad : SWA::SPadState{};
 +    if (pad && isolateWorldMapInput) *pad = nativeListPad;
++    insideNativeStageList = true;
 +    __imp__sub_82589AE0(ctx, base);
++    insideNativeStageList = false;
 +    if (pad) *pad = saved;
 +#else
 +    __imp__sub_82589AE0(ctx, base);

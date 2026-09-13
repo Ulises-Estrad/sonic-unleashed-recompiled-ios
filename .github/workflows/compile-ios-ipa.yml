@@ -99,6 +99,7 @@ jobs:
               executable = archive.read(prefix + "Sonic Unleashed")
               markers = (
                   b"Arcade native: isolated globe decoration from stage rendering",
+                  b"Arcade native: cached menu input isolated; Back and Pass Time disabled",
                   b"ArcadeCountryNames.dds",
                   b"iOS startup: entering SDL event pump.",
                   b"SYNC-CS-BACKEND condition-variable-ios",

@@ -199,7 +199,7 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..aabe15e 100644
+index 0205276..c228f94 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
 @@ -28,6 +28,7 @@
@@ -400,29 +400,7 @@ index 0205276..aabe15e 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -4758,6 +4844,11 @@ static void UnsetInstancingStream()
- 
- static void DrawPrimitive(GuestDevice* device, uint32_t primitiveType, uint32_t startVertex, uint32_t primitiveCount)
- {
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    // World-map scene meshes are not part of the arcade selector. Keep small
-+    // fullscreen composition passes and the separate native CSD/UP UI path.
-+    if (Video::s_arcadeMenuOnly.load() && primitiveCount > 6) return;
-+#endif
-     LocalRenderCommandQueue queue;
-     FlushRenderStateForMainThread(device, queue);
- 
-@@ -4800,6 +4891,9 @@ static void ProcDrawPrimitive(const RenderCommand& cmd)
- 
- static void DrawIndexedPrimitive(GuestDevice* device, uint32_t primitiveType, int32_t baseVertexIndex, uint32_t startIndex, uint32_t primCount)
- {
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    if (Video::s_arcadeMenuOnly.load()) return;
-+#endif
-     LocalRenderCommandQueue queue;
-     FlushRenderStateForMainThread(device, queue);
- 
-@@ -6398,6 +6492,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6398,6 +6484,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
  #endif
  )
  {
@@ -433,7 +411,7 @@ index 0205276..aabe15e 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6507,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6409,6 +6499,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      cmd.addPipeline.hash = pipelineHash;
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
@@ -444,7 +422,7 @@ index 0205276..aabe15e 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6616,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6514,6 +6608,9 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.token = tokenPair.sharedToken;
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
@@ -454,7 +432,7 @@ index 0205276..aabe15e 100644
  #endif
              g_pipelineStateQueue.enqueue(queueItem);
          }
-@@ -7086,27 +7191,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7183,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -512,7 +490,7 @@ index 0205276..aabe15e 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7408,9 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7400,9 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -522,7 +500,7 @@ index 0205276..aabe15e 100644
  
      while (true)
      {
-@@ -7291,6 +7429,12 @@ static void PipelineTaskConsumerThread()
+@@ -7291,6 +7421,12 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -535,7 +513,7 @@ index 0205276..aabe15e 100644
  
          for (auto& [type, databaseData] : localPipelineTaskQueue)
          {
-@@ -7358,6 +7502,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7494,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -557,7 +535,7 @@ index 0205276..aabe15e 100644
                  }
  
                  break;
-@@ -7515,6 +7674,17 @@ static void PipelineTaskConsumerThread()
+@@ -7515,6 +7666,17 @@ static void PipelineTaskConsumerThread()
              }
          }
  
@@ -576,18 +554,10 @@ index 0205276..aabe15e 100644
              localPipelineTaskQueue.clear();
  
 diff --git a/UnleashedRecomp/gpu/video.h b/UnleashedRecomp/gpu/video.h
-index 80a0b21..566a0a7 100644
+index 80a0b21..9fe9378 100644
 --- a/UnleashedRecomp/gpu/video.h
 +++ b/UnleashedRecomp/gpu/video.h
-@@ -15,6 +15,7 @@ using namespace plume;
- 
- struct Video
- {
-+    static inline std::atomic<bool> s_arcadeMenuOnly{false};
-     static inline uint32_t s_viewportWidth;
-     static inline uint32_t s_viewportHeight;
- 
-@@ -23,6 +24,7 @@ struct Video
+@@ -23,6 +23,7 @@ struct Video
      static void HandleApplicationBackgroundState(bool isBackgrounded);
      static void Present();
      static void StartPipelinePrecompilation();
@@ -1248,7 +1218,7 @@ index 61ac40d..05f350b 100644
 +#endif
  }
 diff --git a/UnleashedRecomp/patches/aspect_ratio_patches.cpp b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
-index 02f49ee..a021a36 100644
+index 02f49ee..5210368 100644
 --- a/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 +++ b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 @@ -5,6 +5,9 @@
@@ -1272,7 +1242,7 @@ index 02f49ee..a021a36 100644
  
  static XXH64_hash_t HashStr(const std::string_view& value)
  {
-@@ -88,6 +95,36 @@ static void EmplacePath(const void* key, const std::string_view& value)
+@@ -88,6 +95,44 @@ static void EmplacePath(const void* key, const std::string_view& value)
  {
      std::lock_guard lock(g_pathMutex);
      g_paths.emplace(key, HashStr(value));
@@ -1289,7 +1259,15 @@ index 02f49ee..a021a36 100644
 +    // The arcade selector has no interactive planet backdrop.
 +    if (value.starts_with("ui_worldmap/") &&
 +        (value.find("/worldmap_background") != std::string_view::npos ||
-+         value.starts_with("ui_worldmap/contents/info/")))
++         value.starts_with("ui_worldmap/contents/info/") ||
++         value.starts_with("ui_worldmap/contents/cursor/") ||
++         value.starts_with("ui_worldmap/contents/active_parts/")))
++        g_arcadeHiddenTitlePaths.insert(HashStr(value));
++    // Keep the native Select prompt; Back is deliberately unavailable here.
++    if (value.starts_with("ui_worldmap/footer/") &&
++        (value.ends_with("/btn_B") || value.ends_with("/btn_B_txt") ||
++         value.find("/btn_B/") != std::string_view::npos ||
++         value.find("/btn_B_txt/") != std::string_view::npos))
 +        g_arcadeHiddenTitlePaths.insert(HashStr(value));
 +    // Remove entire medal groups, including their child counters, from native UI.
 +    if ((value.starts_with("ui_worldmap/") || value.starts_with("ui_playscreen/") ||
@@ -1309,7 +1287,7 @@ index 02f49ee..a021a36 100644
  }
  
  static void TraverseCast(Chao::CSD::Scene* scene, uint32_t castNodeIndex, Chao::CSD::CastNode* castNode, uint32_t castIndex, const std::string& parentPath)
-@@ -257,7 +294,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
+@@ -257,7 +302,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
  PPC_FUNC(sub_8258B558)
  {
      auto r3 = ctx.r3;
@@ -1318,7 +1296,7 @@ index 02f49ee..a021a36 100644
  
      uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
      if (worldMapSimpleInfo != NULL)
-@@ -355,6 +392,7 @@ enum
+@@ -355,6 +400,7 @@ enum
      CONTROL_TUTORIAL = 1 << 22,
  
      LOADING_ARROW = 1 << 23,
@@ -1326,7 +1304,7 @@ index 02f49ee..a021a36 100644
  };
  
  struct CsdModifier
-@@ -801,6 +839,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
+@@ -801,6 +847,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
              return {};
  
          path = findResult->second;
@@ -1339,7 +1317,7 @@ index 02f49ee..a021a36 100644
      }
  
      auto findResult = g_modifiers.find(path);
-@@ -1134,6 +1178,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
+@@ -1134,6 +1186,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
          BlackBar::g_loadingBlackBarMax = ImVec2{ position[0], position[1] };
      }
  
@@ -1667,7 +1645,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..b62039c 100644
+index d9130f4..aa7a877 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1675,7 +1653,7 @@ index d9130f4..b62039c 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=9
++VERSION_REVISION=10
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -2906,17 +2884,16 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..dc5727d
+index 0000000..9410b59
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
-@@ -0,0 +1,351 @@
+@@ -0,0 +1,381 @@
 +#include <api/SWA.h>
 +#include <cpu/guest_stack_var.h>
 +#include <kernel/function.h>
 +#include <os/logger.h>
 +#include <ui/options_menu.h>
 +#include <ui/arcade_country_caption.h>
-+#include <gpu/video.h>
 +#include "arcade_selector.h"
 +#include "arcade_native_catalog.h"
 +
@@ -2930,6 +2907,56 @@ index 0000000..dc5727d
 +PPC_FUNC_IMPL(__imp__sub_8258AA08);
 +PPC_FUNC_IMPL(__imp__sub_82588948);
 +PPC_FUNC_IMPL(__imp__sub_8256F1A8);
++PPC_FUNC_IMPL(__imp__sub_82588E78);
++PPC_FUNC_IMPL(__imp__sub_82577010);
++PPC_FUNC_IMPL(__imp__sub_82573AB8);
++PPC_FUNC_IMPL(__imp__sub_82573C08);
++PPC_FUNC_IMPL(__imp__sub_8252CCD8);
++
++namespace
++{
++    // These three RTTI-identified initializers create only the planet, space,
++    // and globe core decoration. Keep their data/navigation objects alive but
++    // do not register their meshes in the render groups. No GPU-wide state,
++    // asset deletion, or gameplay draw filtering is involved.
++    thread_local unsigned backdropInitializationDepth = 0;
++    struct BackdropInitialization
++    {
++        BackdropInitialization() { ++backdropInitializationDepth; }
++        ~BackdropInitialization() { --backdropInitializationDepth; }
++    };
++}
++
++PPC_FUNC(sub_82577010)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const BackdropInitialization scope;
++    LOGN("Arcade native: isolated globe decoration from stage rendering");
++#endif
++    __imp__sub_82577010(ctx, base);
++}
++PPC_FUNC(sub_82573AB8)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const BackdropInitialization scope;
++#endif
++    __imp__sub_82573AB8(ctx, base);
++}
++PPC_FUNC(sub_82573C08)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const BackdropInitialization scope;
++#endif
++    __imp__sub_82573C08(ctx, base);
++}
++// CWorld::AddRenderable(group, shared_ptr<CRenderable>), borrowed arguments.
++PPC_FUNC(sub_8252CCD8)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (backdropInitializationDepth != 0) return;
++#endif
++    __imp__sub_8252CCD8(ctx, base);
++}
 +
 +PPC_FUNC(sub_8256F1A8)
 +{
@@ -2944,7 +2971,7 @@ index 0000000..dc5727d
 +PPC_FUNC(sub_8258AA08)
 +{
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    Video::s_arcadeMenuOnly.store(true);
++    ArcadeCountryCaption::SetVisible(false);
 +#endif
 +    __imp__sub_8258AA08(ctx, base);
 +}
@@ -2952,9 +2979,19 @@ index 0000000..dc5727d
 +PPC_FUNC(sub_82588948)
 +{
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    Video::s_arcadeMenuOnly.store(false);
++    ArcadeCountryCaption::SetVisible(false);
 +#endif
 +    __imp__sub_82588948(ctx, base);
++}
++
++// Stage launch is explicit: the world-map owner can survive into loading, so
++// its destructor is not a reliable lifetime boundary for a separate overlay.
++PPC_FUNC(sub_82588E78)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    ArcadeCountryCaption::SetVisible(false);
++#endif
++    __imp__sub_82588E78(ctx, base);
 +}
 +
 +namespace
@@ -2964,36 +3001,6 @@ index 0000000..dc5727d
 +    uint32_t currentCore = 0;
 +    bool isolateWorldMapInput = false;
 +    SWA::SPadState nativeListPad{};
-+
-+    void ReturnToTitle(PPCContext& ctx, uint8_t* base, uint32_t owner)
-+    {
-+        const PPCContext saved = ctx;
-+        guest_stack_var<Hedgehog::Base::CSharedString> intro("Intro");
-+        guest_stack_var<uint32_t> consumedName;
-+        guest_stack_var<std::array<uint32_t, 2>> result;
-+        const auto resultAddress = g_memory.MapVirtual(result.get());
-+        PPC_STORE_U32(resultAddress, 0);
-+        PPC_STORE_U32(resultAddress + 4, 0);
-+        ctx.r3.u32 = g_memory.MapVirtual(consumedName.get());
-+        ctx.r4.u32 = g_memory.MapVirtual(intro.get());
-+        sub_82DFB920(ctx, base);
-+        ctx.r3.u32 = resultAddress;
-+        ctx.r4.u32 = owner;
-+        ctx.r5.u32 = g_memory.MapVirtual(consumedName.get());
-+        ctx.r6.u32 = 0;
-+        ctx.r8.u32 = 0;
-+        ctx.f1.f64 = 0;
-+        // Same native state-machine request as retail world-map Back->Intro.
-+        // The request consumes its own shared-string copy, not intro above.
-+        sub_82E67A88(ctx, base);
-+        if (const auto reference = PPC_LOAD_U32(resultAddress + 4))
-+        {
-+            ctx.r3.u32 = reference;
-+            sub_822C0890(ctx, base);
-+        }
-+        ctx = saved;
-+        LOGN("Arcade native: returning directly to title");
-+    }
 +
 +    const ArcadeNative::Stage* FindStage(const char* sequence)
 +    {
@@ -3170,11 +3177,6 @@ index 0000000..dc5727d
 +        }
 +        else
 +        {
-+            if (pad->IsTapped(SWA::eKeyState_B))
-+            {
-+                ReturnToTitle(ctx, base, owner);
-+                return;
-+            }
 +            const bool previous = pad->IsTapped(SWA::eKeyState_LeftBumper);
 +            const bool next = pad->IsTapped(SWA::eKeyState_RightBumper);
 +            if (previous || next)
@@ -3192,6 +3194,9 @@ index 0000000..dc5727d
 +                *pad = {};
 +            }
 +            pad->TappedState = uint32_t(pad->TappedState) & ~uint32_t(SWA::eKeyState_B);
++            pad->DownState = uint32_t(pad->DownState) & ~uint32_t(SWA::eKeyState_B);
++            pad->ReleasedState = uint32_t(pad->ReleasedState) & ~uint32_t(SWA::eKeyState_B);
++            pad->UpState = uint32_t(pad->UpState) | uint32_t(SWA::eKeyState_B);
 +        }
 +    }
 +    // Only the native stage-list state may consume navigation. The rest of the
@@ -3260,6 +3265,9 @@ index 0000000..dc5727d
 +    }
 +#endif
 +    __imp__sub_82589670(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    ArcadeCountryCaption::SetVisible(PPC_LOAD_U32(owner + 0x94) == 3);
++#endif
 +}
 diff --git a/UnleashedRecomp/patches/arcade_selector.h b/UnleashedRecomp/patches/arcade_selector.h
 new file mode 100644
@@ -3272,7 +3280,7 @@ index 0000000..452f745
 +void ArcadeWorldMapUpdate(PPCContext& ctx, uint8_t* base);
 diff --git a/UnleashedRecomp/patches/arcade_native_catalog.h b/UnleashedRecomp/patches/arcade_native_catalog.h
 new file mode 100644
-index 0000000..987bdda
+index 0000000..f0937d9
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_native_catalog.h
 @@ -0,0 +1,60 @@
@@ -3331,17 +3339,17 @@ index 0000000..987bdda
 +    {7, 1, "PlayNYActionSub01", "Act 2"},
 +    {7, 2, "PlayNYActionSub02", "Act 3"},
 +    {7, 3, "PlayNYActionSub03", "Act 1 (Hard)"},
-+    {8, 0, "GoToEggManLandAction", "Day Route"},
++    {8, 0, "GoToEggManLandAction", "Act 1"},
 +}};
 +inline constexpr std::array<unsigned, 9> countryOrder{0, 3, 1, 2, 6, 4, 5, 7, 8};
 +inline constexpr std::array<const char*, 9> countryNames{"Apotos", "Spagonia", "Chun-Nan", "Mazuri", "Holoska", "Shamar", "Adabat", "Empire City", "Eggmanland"};
 +}
 diff --git a/UnleashedRecomp/ui/arcade_country_caption.cpp b/UnleashedRecomp/ui/arcade_country_caption.cpp
 new file mode 100644
-index 0000000..3d7ad30
+index 0000000..391fcc3
 --- /dev/null
 +++ b/UnleashedRecomp/ui/arcade_country_caption.cpp
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,70 @@
 +#include "arcade_country_caption.h"
 +#include <imgui.h>
 +#include <algorithm>
@@ -3356,12 +3364,20 @@ index 0000000..3d7ad30
 +namespace {
 +std::mutex captionMutex;
 +bool pending = false;
++bool visible = false;
 +ImVec2 position, extent;
 +unsigned opacity;
++}
++void ArcadeCountryCaption::SetVisible(bool value)
++{
++    std::lock_guard lock(captionMutex);
++    visible = value;
++    if (!visible) pending = false;
 +}
 +void ArcadeCountryCaption::Queue(float left, float top, float right, float bottom, unsigned alpha)
 +{
 +    std::lock_guard lock(captionMutex);
++    if (!visible) return;
 +    position = {left, top}; extent = {right-left, bottom-top}; opacity = alpha; pending = true;
 +}
 +void ArcadeCountryCaption::Draw()
@@ -3386,7 +3402,7 @@ index 0000000..3d7ad30
 +    static unsigned lastCountry = 99;
 +    static float fade = 0;
 +    std::lock_guard lock(captionMutex);
-+    if (!pending) { fade = 0; lastCountry = 99; return; }
++    if (!visible || !pending) { pending = false; fade = 0; lastCountry = 99; return; }
 +    pending = false;
 +    unsigned current = country.load();
 +    if (current >= 9 || !atlas || extent.x <= 0 || extent.y <= 0) return;
@@ -3406,15 +3422,16 @@ index 0000000..3d7ad30
 +}
 diff --git a/UnleashedRecomp/ui/arcade_country_caption.h b/UnleashedRecomp/ui/arcade_country_caption.h
 new file mode 100644
-index 0000000..90a5429
+index 0000000..ba7479c
 --- /dev/null
 +++ b/UnleashedRecomp/ui/arcade_country_caption.h
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,9 @@
 +#pragma once
 +#include <atomic>
 +struct ArcadeCountryCaption
 +{
 +    static inline std::atomic<unsigned> country{0};
++    static void SetVisible(bool visible);
 +    static void Queue(float left, float top, float right, float bottom, unsigned alpha);
 +    static void Draw();
 +};

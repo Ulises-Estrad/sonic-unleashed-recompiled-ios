@@ -101,7 +101,7 @@
       "name": "Eggmanland",
       "archive_suffix": "EggmanLand",
       "stages": [
-        { "label": "Day Route", "archive": "Act_EggmanLand", "source": "game", "eggmanland_day_mod": true }
+        { "label": "Act 1", "archive": "Act_EggmanLand", "source": "game", "eggmanland_day_mod": true }
       ]
     }
   ]

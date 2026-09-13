@@ -3006,10 +3006,10 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..f5b9e3c
+index 0000000..bf6aa17
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
-@@ -0,0 +1,472 @@
+@@ -0,0 +1,494 @@
 +#include <api/SWA.h>
 +#include <cpu/guest_stack_var.h>
 +#include <kernel/function.h>
@@ -3039,6 +3039,28 @@ index 0000000..f5b9e3c
 +PPC_FUNC_IMPL(__imp__sub_82B4E608);
 +PPC_FUNC_IMPL(__imp__sub_8256D338);
 +PPC_FUNC_IMPL(__imp__sub_82486258);
++PPC_FUNC_IMPL(__imp__sub_82573798);
++
++// CWorldMapSun owns the original word_map_sun particle effect. Normal globe
++// navigation positions it through 82573958 (called at 82583678); direct stage
++// selection can bypass that first update. Initialize its native daytime pose
++// once, without invoking the time-change state machine or allocating an overlay.
++PPC_FUNC(sub_82573798)
++{
++    __imp__sub_82573798(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (ctx.r3.u32)
++    {
++        const PPCContext saved = ctx;
++        guest_stack_var<std::array<uint32_t, 4>> rotation;
++        rotation.get()->fill(0); // four big-endian float zeros
++        ctx.r4.u32 = g_memory.MapVirtual(rotation.get());
++        sub_82573958(ctx, base);
++        ctx = saved;
++        LOGN("Arcade native: initialized original background sun without time input");
++    }
++#endif
++}
 +
 +// CWorldMapCamera reads the separate raw pad (83361F5C), outside the stage
 +// list's cached-input scope. Its +E8 flag skips only joystick rotation

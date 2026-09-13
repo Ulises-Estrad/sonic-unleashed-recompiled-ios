@@ -99,6 +99,7 @@ jobs:
               assert prefix + "Sonic Unleashed" in archive.namelist()
               executable = archive.read(prefix + "Sonic Unleashed")
               markers = (
+                  b"Arcade native: initialized original background sun without time input",
                   b"Arcade gameplay: explicit restart clears live and checkpoint score",
                   b"Arcade gameplay: rank accepted; native completion skips medals and EXP",
                   b"Arcade native: isolated globe decoration from stage rendering",

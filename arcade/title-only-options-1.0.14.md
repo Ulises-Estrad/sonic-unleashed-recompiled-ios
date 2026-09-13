@@ -5,6 +5,7 @@
 - Remove the separate stage-list Start-to-Options shortcut, not just the native pause row. Native Start handling remains available.
 - Strip Square/X from every world-map frame's SWA pad and from all five native cached button masks, including transition states outside normal stage-list input isolation. Restore original input after the frame so stage gameplay is unaffected.
 - Preserve 1.0.13's medal panel and globe crosshair cleanup, restart score reset, ordinary death score retention, and all prepared game data.
+- Initialize the original `CWorldMapSun` effect's native daytime pose after construction. Its `word_map_sun.part-bin`, material and texture remain in TitleModel; this does not restore time-change input or medal icons. Normal globe positioning calls 82573958 at 82583678; the direct-entry route needs an initial pose without waiting for that navigation branch. Visual confirmation on iPhone remains pending.
 
 Local native selector and gameplay fixtures pass: Options no longer opens from stage-select Start; native pause counts and actions agree; X is blocked in normal and transitional world-map cached input and restored outside it; list navigation, country switching and gameplay hooks remain intact. Phone verification is still required for 1.0.14.
 

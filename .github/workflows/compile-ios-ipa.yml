@@ -98,6 +98,8 @@ jobs:
               assert prefix + "Sonic Unleashed" in archive.namelist()
               executable = archive.read(prefix + "Sonic Unleashed")
               markers = (
+                  b"Arcade native: returning directly to title",
+                  b"ArcadeCountryNames.dds",
                   b"iOS startup: entering SDL event pump.",
                   b"SYNC-CS-BACKEND condition-variable-ios",
                   b"iOS startup: Day-Stage Arcade enabled; bundled GameData required.",

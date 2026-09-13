@@ -92,7 +92,7 @@ jobs:
               info = plistlib.loads(archive.read(prefix + "Info.plist"))
               assert info["CFBundleDisplayName"] == "Sonic Unleashed"
               assert info["CFBundleExecutable"] == "Sonic Unleashed"
-              assert info["CFBundleShortVersionString"] == "1.0.13"
+              assert info["CFBundleShortVersionString"] == "1.0.14"
               assert info["UILaunchScreen"] == {}
               assert info["UIStatusBarHidden"] is True
               assert info["UIViewControllerBasedStatusBarAppearance"] is False

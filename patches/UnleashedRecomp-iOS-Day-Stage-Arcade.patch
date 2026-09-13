@@ -1044,10 +1044,10 @@ index 1cf6725..e14f1ff 100644
          pGameModeStageTitle->m_AdvertiseMovieWaitTime = 0;
  }
 diff --git a/UnleashedRecomp/patches/CHudPause_patches.cpp b/UnleashedRecomp/patches/CHudPause_patches.cpp
-index 51990fa..436dadd 100644
+index 51990fa..3485e7b 100644
 --- a/UnleashedRecomp/patches/CHudPause_patches.cpp
 +++ b/UnleashedRecomp/patches/CHudPause_patches.cpp
-@@ -14,9 +14,46 @@ float g_achievementMenuOutroTime = 0.0f;
+@@ -14,9 +14,50 @@ float g_achievementMenuOutroTime = 0.0f;
  constexpr float g_achievementMenuOutroThreshold = 0.32f;
  bool g_isAchievementMenuOutro = false;
  
@@ -1069,6 +1069,8 @@ index 51990fa..436dadd 100644
 +            return;
 +        }
 +        const auto* pause = reinterpret_cast<SWA::CHudPause*>(base + ctx.r3.u32);
++        if (name == "option" && (pause->m_Menu == SWA::eMenuType_Stage || pause->m_Menu == SWA::eMenuType_WorldMap))
++            return;
 +        const bool stageRestart = name == "restart" && pause->m_Menu == SWA::eMenuType_Stage;
 +        if (name != "continue" && name != "option" && name != "end_game" && !stageRestart)
 +            return;
@@ -1090,11 +1092,13 @@ index 51990fa..436dadd 100644
 +        guest_stack_var<Hedgehog::Base::CSharedString> restart("restart");
 +        GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), restart.get());
 +    }
++    if (pause->m_Menu == SWA::eMenuType_Stage || pause->m_Menu == SWA::eMenuType_WorldMap)
++        return;
 +#endif
      guest_stack_var<Hedgehog::Base::CSharedString> name("option");
  
      GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), name.get());
-@@ -49,6 +86,7 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+@@ -49,6 +90,7 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
              break;
      }
  
@@ -1102,7 +1106,7 @@ index 51990fa..436dadd 100644
      if (auto pInputState = SWA::CInputState::GetInstance())
      {
          if (pInputState->GetPadState().IsTapped(SWA::eKeyState_Select))
-@@ -62,8 +100,18 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+@@ -62,9 +104,25 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
          }
      }
  
@@ -1110,6 +1114,7 @@ index 51990fa..436dadd 100644
 +
      if (pHudPause->m_Status == SWA::eStatusType_Accept)
      {
+-        if (cursorIndex == count - 2)
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
 +        if (pHudPause->m_Menu == SWA::eMenuType_Stage && cursorIndex == 1)
 +        {
@@ -1118,23 +1123,31 @@ index 51990fa..436dadd 100644
 +            return true;
 +        }
 +#endif
-         if (cursorIndex == count - 2)
++        const bool optionsAllowed =
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++            pHudPause->m_Menu != SWA::eMenuType_Stage && pHudPause->m_Menu != SWA::eMenuType_WorldMap;
++#else
++            true;
++#endif
++        if (optionsAllowed && cursorIndex == count - 2)
          {
              OptionsMenu::Open(true, pHudPause->m_Menu);
-@@ -90,7 +138,12 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+ 
+@@ -90,7 +148,13 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
  
  bool CHudPauseItemCountMidAsmHook(PPCRegister& pThis, PPCRegister& count)
  {
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
 +    const auto* pause = reinterpret_cast<SWA::CHudPause*>(g_memory.Translate(pThis.u32));
-+    count.u32 = pause->m_Menu == SWA::eMenuType_Stage ? 4 : 3;
++    count.u32 = pause->m_Menu == SWA::eMenuType_Stage ? 3 :
++        pause->m_Menu == SWA::eMenuType_WorldMap ? 2 : 3;
 +#else
      count.u32 += 1;
 +#endif
  
      return InjectMenuBehaviour(pThis.u32, count.u32);
  }
-@@ -170,6 +223,7 @@ PPC_FUNC(sub_824B0930)
+@@ -170,6 +234,7 @@ PPC_FUNC(sub_824B0930)
      {
          g_achievementMenuIntroTime = 0;
  
@@ -1142,7 +1155,7 @@ index 51990fa..436dadd 100644
          if (*SWA::SGlobals::ms_IsRenderHud && pHudPause->m_IsShown && !pHudPause->m_Submenu && pHudPause->m_Transition == SWA::eTransitionType_Undefined)
          {
              ButtonGuide::Open(Button("Achievements_Name", FLT_MAX, EButtonIcon::Back, EButtonAlignment::Left, EFontQuality::Low));
-@@ -180,6 +234,7 @@ PPC_FUNC(sub_824B0930)
+@@ -180,6 +245,7 @@ PPC_FUNC(sub_824B0930)
              ButtonGuide::Close();
              g_isClosed = true;
          }
@@ -1812,7 +1825,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..545b4b2 100644
+index d9130f4..03def65 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1820,7 +1833,7 @@ index d9130f4..545b4b2 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=13
++VERSION_REVISION=14
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -2993,10 +3006,10 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..b6888e6
+index 0000000..f5b9e3c
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
-@@ -0,0 +1,473 @@
+@@ -0,0 +1,472 @@
 +#include <api/SWA.h>
 +#include <cpu/guest_stack_var.h>
 +#include <kernel/function.h>
@@ -3276,7 +3289,7 @@ index 0000000..b6888e6
 +{
 +    __imp__sub_82B4E608(ctx, base);
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    if (!insideWorldMap || !isolateWorldMapInput || !ctx.r3.u32) return;
++    if (!insideWorldMap || !ctx.r3.u32) return;
 +    static bool logged = false;
 +    if (!logged) { logged = true; LOGN("Arcade native: cached menu input isolated; Back and Pass Time disabled"); }
 +    const uint32_t address = ctx.r3.u32;
@@ -3290,11 +3303,11 @@ index 0000000..b6888e6
 +        entry = cachedInputs.end() - 1;
 +    }
 +    memcpy(base + address, entry->bytes.data(), entry->bytes.size());
-+    if (!insideNativeStageList || OptionsMenu::s_isVisible)
++    if (isolateWorldMapInput && (!insideNativeStageList || OptionsMenu::s_isVisible))
 +        memset(base + address, 0, entry->bytes.size());
 +    else
 +        for (unsigned offset = 0; offset < 0x14; offset += 4)
-+            PPC_STORE_U32(address + offset, PPC_LOAD_U32(address + offset) & ~0xAu);
++            PPC_STORE_U32(address + offset, PPC_LOAD_U32(address + offset) & ~(isolateWorldMapInput ? 0xAu : 0x8u));
 +#endif
 +}
 +
@@ -3351,6 +3364,16 @@ index 0000000..b6888e6
 +    auto* input = SWA::CInputState::GetInstance();
 +    auto* pad = input ? &const_cast<SWA::SPadState&>(input->GetPadState()) : nullptr;
 +    const SWA::SPadState savedPad = pad ? *pad : SWA::SPadState{};
++    // Square is never a time-change command in the arcade world map, even
++    // during entry/exit transitions. Restore the original pad after this frame
++    // so this does not disable Square's normal gameplay actions.
++    if (pad)
++    {
++        pad->TappedState = uint32_t(pad->TappedState) & ~uint32_t(SWA::eKeyState_X);
++        pad->DownState = uint32_t(pad->DownState) & ~uint32_t(SWA::eKeyState_X);
++        pad->ReleasedState = uint32_t(pad->ReleasedState) & ~uint32_t(SWA::eKeyState_X);
++        pad->UpState = uint32_t(pad->UpState) | uint32_t(SWA::eKeyState_X);
++    }
 +    const uint32_t state = PPC_LOAD_U32(owner + 0x94);
 +    const uint32_t mission = PPC_LOAD_U32(owner + 0x80);
 +    if (const auto cursor = PPC_LOAD_U32(owner + 0x60))
@@ -3361,17 +3384,6 @@ index 0000000..b6888e6
 +    }
 +    if (state == 3 && mission && pad)
 +    {
-+        if (OptionsMenu::s_isVisible)
-+        {
-+            if (OptionsMenu::CanClose() && pad->IsTapped(SWA::eKeyState_B)) OptionsMenu::Close();
-+            *pad = {};
-+        }
-+        else if (pad->IsTapped(SWA::eKeyState_Start))
-+        {
-+            OptionsMenu::Open();
-+            *pad = {};
-+        }
-+        else
 +        {
 +            const bool previous = pad->IsTapped(SWA::eKeyState_LeftBumper);
 +            const bool next = pad->IsTapped(SWA::eKeyState_RightBumper);

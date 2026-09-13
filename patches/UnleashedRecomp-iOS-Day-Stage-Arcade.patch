@@ -1245,7 +1245,7 @@ index 61ac40d..05f350b 100644
 +#endif
  }
 diff --git a/UnleashedRecomp/patches/aspect_ratio_patches.cpp b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
-index 02f49ee..60d7ea4 100644
+index 02f49ee..1e2f7b0 100644
 --- a/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 +++ b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 @@ -5,6 +5,9 @@
@@ -1258,7 +1258,7 @@ index 02f49ee..60d7ea4 100644
  
  #include "aspect_ratio_patches.h"
  #include "camera_patches.h"
-@@ -78,6 +81,10 @@ namespace Chao::CSD
+@@ -78,16 +81,86 @@ namespace Chao::CSD
  
  static Mutex g_pathMutex;
  static std::map<const void*, XXH64_hash_t> g_paths;
@@ -1269,11 +1269,33 @@ index 02f49ee..60d7ea4 100644
  
  static XXH64_hash_t HashStr(const std::string_view& value)
  {
-@@ -88,6 +95,53 @@ static void EmplacePath(const void* key, const std::string_view& value)
+     return XXH3_64bits(value.data(), value.size());
+ }
+ 
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++static bool IsArcadeRedundantDecoration(const std::string_view& value)
++{
++    // CHudMedalForPause creates u_info (824A9C88). Its slash and bar casts
++    // are siblings of the hidden numbers, so hide the entire medal scene.
++    if ((value.starts_with("ui_playscreen/") || value.starts_with("ui_playscreen_ev/")) &&
++        (value.ends_with("/u_info") || value.find("/u_info/") != std::string_view::npos))
++        return true;
++    // The native globe reticle creates four cts_cursor scenes and a separate
++    // cts_cursor_effect (8256CD14..8256CE1C). Do not hide generic cursor or
++    // active_parts nodes: they also supply the country header and list highlight.
++    return value.starts_with("ui_worldmap/") &&
++        (value.ends_with("/cts_cursor") || value.find("/cts_cursor/") != std::string_view::npos ||
++         value.ends_with("/cts_cursor_effect") || value.find("/cts_cursor_effect/") != std::string_view::npos);
++}
++#endif
++
+ static void EmplacePath(const void* key, const std::string_view& value)
  {
      std::lock_guard lock(g_pathMutex);
      g_paths.emplace(key, HashStr(value));
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (IsArcadeRedundantDecoration(value))
++        g_arcadeHiddenTitlePaths.insert(HashStr(value));
 +    // Names come from the retail ui_title.yncp, not a replacement overlay.
 +    if (value.starts_with("ui_worldmap/") && value.find("/cts_name_2/") != std::string_view::npos &&
 +        (value.ends_with("/img_1") || value.ends_with("/img_2")))
@@ -1323,7 +1345,7 @@ index 02f49ee..60d7ea4 100644
  }
  
  static void TraverseCast(Chao::CSD::Scene* scene, uint32_t castNodeIndex, Chao::CSD::CastNode* castNode, uint32_t castIndex, const std::string& parentPath)
-@@ -257,7 +311,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
+@@ -257,7 +330,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
  PPC_FUNC(sub_8258B558)
  {
      auto r3 = ctx.r3;
@@ -1332,7 +1354,7 @@ index 02f49ee..60d7ea4 100644
  
      uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
      if (worldMapSimpleInfo != NULL)
-@@ -355,6 +409,7 @@ enum
+@@ -355,6 +428,7 @@ enum
      CONTROL_TUTORIAL = 1 << 22,
  
      LOADING_ARROW = 1 << 23,
@@ -1340,7 +1362,7 @@ index 02f49ee..60d7ea4 100644
  };
  
  struct CsdModifier
-@@ -801,6 +856,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
+@@ -801,6 +875,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
              return {};
  
          path = findResult->second;
@@ -1353,7 +1375,7 @@ index 02f49ee..60d7ea4 100644
      }
  
      auto findResult = g_modifiers.find(path);
-@@ -1134,6 +1195,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
+@@ -1134,6 +1214,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
          BlackBar::g_loadingBlackBarMax = ImVec2{ position[0], position[1] };
      }
  
@@ -1404,7 +1426,7 @@ index ec4e1a8..a49ffba 100644
      __imp__sub_82586698(ctx, base);
  }
 diff --git a/UnleashedRecomp/patches/player_patches.cpp b/UnleashedRecomp/patches/player_patches.cpp
-index cce0a58..bd2d0f6 100644
+index cce0a58..b0ff344 100644
 --- a/UnleashedRecomp/patches/player_patches.cpp
 +++ b/UnleashedRecomp/patches/player_patches.cpp
 @@ -4,12 +4,129 @@
@@ -1589,6 +1611,25 @@ index cce0a58..bd2d0f6 100644
      }
  }
  
+@@ -52,6 +186,18 @@ void ResetScoreOnRestartMidAsmHook()
+ {
+     g_lastEnemyScore = 0;
+     g_lastTrickScore = 0;
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // This hook is immediately before the explicit-restart call to 8245F048
++    // at 82304374. Clear its live snapshot too: the arcade reset wrapper
++    // otherwise restores the pre-restart score as though this were a death.
++    // No sticky flag: subsequent deaths must still retain their earned score.
++    if (auto document = SWA::CGameDocument::GetInstance())
++    {
++        document->m_pMember->m_ScoreInfo.EnemyScore = 0;
++        document->m_pMember->m_ScoreInfo.TrickScore = 0;
++    }
++    LOGN("Arcade gameplay: explicit restart clears live and checkpoint score");
++#endif
+ }
+ 
+ // Dark Gaia energy change hook.
 diff --git a/UnleashedRecomp/platform/ios/nfd_stub.cpp b/UnleashedRecomp/platform/ios/nfd_stub.cpp
 new file mode 100644
 index 0000000..736b084
@@ -1771,7 +1812,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..bc7272d 100644
+index d9130f4..545b4b2 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1779,7 +1820,7 @@ index d9130f4..bc7272d 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=12
++VERSION_REVISION=13
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp

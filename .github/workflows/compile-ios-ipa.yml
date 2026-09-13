@@ -92,12 +92,14 @@ jobs:
               info = plistlib.loads(archive.read(prefix + "Info.plist"))
               assert info["CFBundleDisplayName"] == "Sonic Unleashed"
               assert info["CFBundleExecutable"] == "Sonic Unleashed"
+              assert info["CFBundleShortVersionString"] == "1.0.12"
               assert info["UILaunchScreen"] == {}
               assert info["UIStatusBarHidden"] is True
               assert info["UIViewControllerBasedStatusBarAppearance"] is False
               assert prefix + "Sonic Unleashed" in archive.namelist()
               executable = archive.read(prefix + "Sonic Unleashed")
               markers = (
+                  b"Arcade gameplay: rank accepted; native completion skips medals and EXP",
                   b"Arcade native: isolated globe decoration from stage rendering",
                   b"Arcade native: cached menu input isolated; Back and Pass Time disabled",
                   b"ArcadeCountryNames.dds",

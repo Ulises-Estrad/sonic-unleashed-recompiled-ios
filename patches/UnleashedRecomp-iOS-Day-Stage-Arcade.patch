@@ -785,7 +785,7 @@ index a765d12..b1713ce 100644
      fileHandle->stream = std::move(fileStream);
      fileHandle->path = std::move(filePath);
 diff --git a/UnleashedRecomp/main.cpp b/UnleashedRecomp/main.cpp
-index e34d7e1..5677141 100644
+index e34d7e1..75e625e 100644
 --- a/UnleashedRecomp/main.cpp
 +++ b/UnleashedRecomp/main.cpp
 @@ -213,6 +213,20 @@ int main(int argc, char *argv[])
@@ -803,8 +803,8 @@ index e34d7e1..5677141 100644
 +    if (!SeedBundledSaveData())
 +        LOGN_WARNING("Unable to seed the bundled save data; existing user saves were left unchanged.");
 +
-+    if (!PrepareArcadeSaveData())
-+        LOGN_WARNING("Unable to apply the arcade stat defaults; the save backup was left unchanged.");
++    // Arcade stat levels are enforced through the native progression getters.
++    // Do not patch guessed offsets in the on-disk SYS-DATA payload.
 +
  #if TARGET_OS_IOS
      if (!apple::SupportsBCTextures()) {
@@ -1044,10 +1044,10 @@ index 1cf6725..e14f1ff 100644
          pGameModeStageTitle->m_AdvertiseMovieWaitTime = 0;
  }
 diff --git a/UnleashedRecomp/patches/CHudPause_patches.cpp b/UnleashedRecomp/patches/CHudPause_patches.cpp
-index 51990fa..233d9f6 100644
+index 51990fa..436dadd 100644
 --- a/UnleashedRecomp/patches/CHudPause_patches.cpp
 +++ b/UnleashedRecomp/patches/CHudPause_patches.cpp
-@@ -14,6 +14,30 @@ float g_achievementMenuOutroTime = 0.0f;
+@@ -14,9 +14,46 @@ float g_achievementMenuOutroTime = 0.0f;
  constexpr float g_achievementMenuOutroThreshold = 0.32f;
  bool g_isAchievementMenuOutro = false;
  
@@ -1068,7 +1068,9 @@ index 51990fa..233d9f6 100644
 +            __imp__sub_824AE690(ctx, base);
 +            return;
 +        }
-+        if (name != "continue" && name != "option" && name != "end_game")
++        const auto* pause = reinterpret_cast<SWA::CHudPause*>(base + ctx.r3.u32);
++        const bool stageRestart = name == "restart" && pause->m_Menu == SWA::eMenuType_Stage;
++        if (name != "continue" && name != "option" && name != "end_game" && !stageRestart)
 +            return;
 +    }
 +#endif
@@ -1078,7 +1080,21 @@ index 51990fa..233d9f6 100644
  void CHudPauseAddOptionsItemMidAsmHook(PPCRegister& pThis)
  {
      guest_stack_var<Hedgehog::Base::CSharedString> menu("TopMenu");
-@@ -49,6 +73,7 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const auto* pause = reinterpret_cast<SWA::CHudPause*>(g_memory.Translate(pThis.u32));
++    // Retail omits this row for mission-style stages. The arcade pause menu
++    // supports restarting those stages too, through the same stage action.
++    if (pause->m_Menu == SWA::eMenuType_Stage &&
++        *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(pThis.u32 + 0x198)) != 0)
++    {
++        guest_stack_var<Hedgehog::Base::CSharedString> restart("restart");
++        GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), restart.get());
++    }
++#endif
+     guest_stack_var<Hedgehog::Base::CSharedString> name("option");
+ 
+     GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), name.get());
+@@ -49,6 +86,7 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
              break;
      }
  
@@ -1086,7 +1102,7 @@ index 51990fa..233d9f6 100644
      if (auto pInputState = SWA::CInputState::GetInstance())
      {
          if (pInputState->GetPadState().IsTapped(SWA::eKeyState_Select))
-@@ -62,6 +87,8 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+@@ -62,8 +100,18 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
          }
      }
  
@@ -1094,20 +1110,31 @@ index 51990fa..233d9f6 100644
 +
      if (pHudPause->m_Status == SWA::eStatusType_Accept)
      {
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++        if (pHudPause->m_Menu == SWA::eMenuType_Stage && cursorIndex == 1)
++        {
++            pHudPause->m_Action = SWA::eActionType_Restart;
++            pHudPause->m_Transition = SWA::eTransitionType_Quit;
++            return true;
++        }
++#endif
          if (cursorIndex == count - 2)
-@@ -90,7 +117,11 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+         {
+             OptionsMenu::Open(true, pHudPause->m_Menu);
+@@ -90,7 +138,12 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
  
  bool CHudPauseItemCountMidAsmHook(PPCRegister& pThis, PPCRegister& count)
  {
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    count.u32 = 3;
++    const auto* pause = reinterpret_cast<SWA::CHudPause*>(g_memory.Translate(pThis.u32));
++    count.u32 = pause->m_Menu == SWA::eMenuType_Stage ? 4 : 3;
 +#else
      count.u32 += 1;
 +#endif
  
      return InjectMenuBehaviour(pThis.u32, count.u32);
  }
-@@ -170,6 +201,7 @@ PPC_FUNC(sub_824B0930)
+@@ -170,6 +223,7 @@ PPC_FUNC(sub_824B0930)
      {
          g_achievementMenuIntroTime = 0;
  
@@ -1115,7 +1142,7 @@ index 51990fa..233d9f6 100644
          if (*SWA::SGlobals::ms_IsRenderHud && pHudPause->m_IsShown && !pHudPause->m_Submenu && pHudPause->m_Transition == SWA::eTransitionType_Undefined)
          {
              ButtonGuide::Open(Button("Achievements_Name", FLT_MAX, EButtonIcon::Back, EButtonAlignment::Left, EFontQuality::Low));
-@@ -180,6 +212,7 @@ PPC_FUNC(sub_824B0930)
+@@ -180,6 +234,7 @@ PPC_FUNC(sub_824B0930)
              ButtonGuide::Close();
              g_isClosed = true;
          }
@@ -1218,7 +1245,7 @@ index 61ac40d..05f350b 100644
 +#endif
  }
 diff --git a/UnleashedRecomp/patches/aspect_ratio_patches.cpp b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
-index 02f49ee..3cf85fa 100644
+index 02f49ee..60d7ea4 100644
 --- a/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 +++ b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 @@ -5,6 +5,9 @@
@@ -1242,7 +1269,7 @@ index 02f49ee..3cf85fa 100644
  
  static XXH64_hash_t HashStr(const std::string_view& value)
  {
-@@ -88,6 +95,45 @@ static void EmplacePath(const void* key, const std::string_view& value)
+@@ -88,6 +95,53 @@ static void EmplacePath(const void* key, const std::string_view& value)
  {
      std::lock_guard lock(g_pathMutex);
      g_paths.emplace(key, HashStr(value));
@@ -1270,6 +1297,10 @@ index 02f49ee..3cf85fa 100644
 +         value.find("/btn_B/") != std::string_view::npos ||
 +         value.find("/btn_B_txt/") != std::string_view::npos))
 +        g_arcadeHiddenTitlePaths.insert(HashStr(value));
++    // Hide the entire lives scene, not just its number: player_count also owns
++    // the Sonic head icon. Leave time, score, rings and energy scenes untouched.
++    if (value == "ui_playscreen/player_count" || value.starts_with("ui_playscreen/player_count/"))
++        g_arcadeHiddenTitlePaths.insert(HashStr(value));
 +    // Remove entire medal groups, including their child counters, from native UI.
 +    if ((value.starts_with("ui_worldmap/") || value.starts_with("ui_playscreen/") ||
 +         value.starts_with("ui_playscreen_ev/") || value.starts_with("ui_pause/")) &&
@@ -1279,6 +1310,10 @@ index 02f49ee..3cf85fa 100644
 +         value.find("/s_num_nume") != std::string_view::npos ||
 +         value.find("/m_num_deno") != std::string_view::npos ||
 +         value.find("/m_num_nume") != std::string_view::npos ||
++         value.find("/num_deno_m") != std::string_view::npos ||
++         value.find("/num_nume_m") != std::string_view::npos ||
++         value.find("/num_deno_s") != std::string_view::npos ||
++         value.find("/num_nume_s") != std::string_view::npos ||
 +         value.find("/moon_position") != std::string_view::npos ||
 +         value.find("/sun_position") != std::string_view::npos ||
 +         value.find("/medal_get_s") != std::string_view::npos ||
@@ -1288,7 +1323,7 @@ index 02f49ee..3cf85fa 100644
  }
  
  static void TraverseCast(Chao::CSD::Scene* scene, uint32_t castNodeIndex, Chao::CSD::CastNode* castNode, uint32_t castIndex, const std::string& parentPath)
-@@ -257,7 +303,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
+@@ -257,7 +311,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
  PPC_FUNC(sub_8258B558)
  {
      auto r3 = ctx.r3;
@@ -1297,7 +1332,7 @@ index 02f49ee..3cf85fa 100644
  
      uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
      if (worldMapSimpleInfo != NULL)
-@@ -355,6 +401,7 @@ enum
+@@ -355,6 +409,7 @@ enum
      CONTROL_TUTORIAL = 1 << 22,
  
      LOADING_ARROW = 1 << 23,
@@ -1305,7 +1340,7 @@ index 02f49ee..3cf85fa 100644
  };
  
  struct CsdModifier
-@@ -801,6 +848,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
+@@ -801,6 +856,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
              return {};
  
          path = findResult->second;
@@ -1318,7 +1353,7 @@ index 02f49ee..3cf85fa 100644
      }
  
      auto findResult = g_modifiers.find(path);
-@@ -1134,6 +1187,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
+@@ -1134,6 +1195,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
          BlackBar::g_loadingBlackBarMax = ImVec2{ position[0], position[1] };
      }
  
@@ -1369,13 +1404,103 @@ index ec4e1a8..a49ffba 100644
      __imp__sub_82586698(ctx, base);
  }
 diff --git a/UnleashedRecomp/patches/player_patches.cpp b/UnleashedRecomp/patches/player_patches.cpp
-index cce0a58..88f54cf 100644
+index cce0a58..bd2d0f6 100644
 --- a/UnleashedRecomp/patches/player_patches.cpp
 +++ b/UnleashedRecomp/patches/player_patches.cpp
-@@ -10,6 +10,39 @@ static uint32_t g_lastTrickScore;
+@@ -4,12 +4,129 @@
+ #include <os/logger.h>
+ #include <app.h>
+ #include <sdl_events.h>
++#include <cpu/guest_stack_var.h>
+ 
+ static uint32_t g_lastEnemyScore;
+ static uint32_t g_lastTrickScore;
  static float g_lastDarkGaiaEnergy;
  static bool g_isUnleashCancelled;
  
++namespace
++{
++    thread_local bool arcadeRankCompletionQueued = false;
++    struct ArcadeGuestSharedPtr { be<uint32_t> object{}; be<uint32_t> control{}; };
++}
++
++// At the rank screen's accepted Next branch, send exactly the stage-mode 10
++// completion message used by CHudStatus after leaving EXP allocation
++// (824A891C..824A89A0). This skips creation of both post-rank menus while
++// retaining the native stage completion/save/return sequence.
++bool ArcadeFinishRankMidAsmHook(PPCRegister& document)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    arcadeRankCompletionQueued = false;
++    guest_stack_var<ArcadeGuestSharedPtr> application;
++    GuestToHostFunction<uint32_t>(sub_824ED808, application.get());
++    if (!application.get()->object)
++    {
++        GuestToHostFunction<void>(sub_82DF9958, application.get());
++        return false;
++    }
++    const auto recipient = GuestToHostFunction<uint32_t>(sub_824EC498, uint32_t(application.get()->object));
++    guest_stack_var<be<uint32_t>> mode(10);
++    guest_stack_var<ArcadeGuestSharedPtr> message;
++    GuestToHostFunction<uint32_t>(sub_8230BBE8, message.get(), mode.get());
++    if (message.get()->object && recipient)
++    {
++        GuestToHostFunction<void>(sub_82E61A78, document.u32 + 0x28,
++            uint32_t(0x8202DC8C), uint32_t(0x26E), recipient, message.get(), 0.0f);
++        arcadeRankCompletionQueued = true;
++        LOGN("Arcade gameplay: rank accepted; native completion skips medals and EXP");
++    }
++    if (message.get()->control)
++        GuestToHostFunction<void>(sub_822C0890, uint32_t(message.get()->control));
++    GuestToHostFunction<void>(sub_82DF9958, application.get());
++    return arcadeRankCompletionQueued;
++#else
++    return false;
++#endif
++}
++
++bool ArcadeSkipRankPauseMidAsmHook()
++{
++    // The original rank path pauses the document for the medal/EXP menus.
++    // Do not pause when those menus were bypassed. Consume this flag once.
++    const bool queued = arcadeRankCompletionQueued;
++    arcadeRankCompletionQueued = false;
++    return queued;
++}
++
++// This entire native routine only grants the 100-ring extra life and its
++// notification/sound; the caller has already updated the real ring count.
++PPC_FUNC_IMPL(__imp__sub_8230C9E8);
++PPC_FUNC(sub_8230C9E8)
++{
++#if !defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    __imp__sub_8230C9E8(ctx, base);
++#endif
++}
++
++// Native daytime upgrade getters, also used when constructing Sonic's context
++// (82321830). SkillParameter.xml caps these at Speed 11 / RingEnergy 6.
++// These are LEVELS, not the live boost amount; drain/refill code is untouched.
++PPC_FUNC_IMPL(__imp__sub_8251A1C8);
++PPC_FUNC(sub_8251A1C8)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const uint32_t data = PPC_LOAD_U32(ctx.r3.u32 + 0x94);
++    PPC_STORE_U32(data + 0x85F0, 11);
++#endif
++    __imp__sub_8251A1C8(ctx, base);
++}
++
++PPC_FUNC_IMPL(__imp__sub_8251A228);
++PPC_FUNC(sub_8251A228)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const uint32_t data = PPC_LOAD_U32(ctx.r3.u32 + 0x94);
++    PPC_STORE_U32(data + 0x85F8, 6);
++#endif
++    __imp__sub_8251A228(ctx, base);
++}
++
 +static bool ShouldSaveStageScore()
 +{
 +#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
@@ -1412,7 +1537,7 @@ index cce0a58..88f54cf 100644
  /* Hook function for when checkpoints are activated
     to preserve the current checkpoint score. */
  PPC_FUNC_IMPL(__imp__sub_82624308);
-@@ -17,7 +50,7 @@ PPC_FUNC(sub_82624308)
+@@ -17,7 +134,7 @@ PPC_FUNC(sub_82624308)
  {
      __imp__sub_82624308(ctx, base);
  
@@ -1421,7 +1546,7 @@ index cce0a58..88f54cf 100644
          return;
  
      if (auto pGameDocument = SWA::CGameDocument::GetInstance())
-@@ -29,22 +62,39 @@ PPC_FUNC(sub_82624308)
+@@ -29,22 +146,39 @@ PPC_FUNC(sub_82624308)
      }
  }
  
@@ -1646,7 +1771,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..56fe861 100644
+index d9130f4..bc7272d 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1654,7 +1779,7 @@ index d9130f4..56fe861 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=11
++VERSION_REVISION=12
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -2394,7 +2519,7 @@ index 0000000..fe5e6b0
 +    void ApplyToState(XAMINPUT_GAMEPAD& state);
 +}
 diff --git a/UnleashedRecomp/user/paths.cpp b/UnleashedRecomp/user/paths.cpp
-index e72b473..950504d 100644
+index e72b473..6826d9d 100644
 --- a/UnleashedRecomp/user/paths.cpp
 +++ b/UnleashedRecomp/user/paths.cpp
 @@ -1,5 +1,6 @@
@@ -2404,7 +2529,7 @@ index e72b473..950504d 100644
  #ifdef TARGET_OS_IPHONE
  #include "../apple_utils.h"
  #endif
-@@ -61,3 +62,132 @@ const std::filesystem::path& GetUserPath()
+@@ -61,3 +62,62 @@ const std::filesystem::path& GetUserPath()
  {
      return g_userPath;
  }
@@ -2467,81 +2592,11 @@ index e72b473..950504d 100644
 +    return true;
 +#endif
 +}
-+
-+bool PrepareArcadeSaveData()
-+{
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    const std::filesystem::path savePath = GetUserPath() / "save" / "SYS-DATA";
-+    if (!std::filesystem::is_regular_file(savePath))
-+        return false;
-+
-+    std::ifstream input(savePath, std::ios::binary | std::ios::ate);
-+    if (!input.good() || input.tellg() < 0x20)
-+        return false;
-+
-+    const std::streamsize size = input.tellg();
-+    input.seekg(0, std::ios::beg);
-+    std::vector<uint8_t> data(size);
-+    if (!input.read(reinterpret_cast<char*>(data.data()), size))
-+        return false;
-+    input.close();
-+
-+    // The raw Xbox save payload stores the allocated daytime stat points as
-+    // big-endian u32 values. Eight Speed points yields level 11 and four Ring
-+    // Energy points yields level 6, the maxima from SkillParameter.xml.
-+    auto readBigEndian = [&](size_t offset)
-+    {
-+        return uint32_t(data[offset]) << 24 |
-+            uint32_t(data[offset + 1]) << 16 |
-+            uint32_t(data[offset + 2]) << 8 |
-+            uint32_t(data[offset + 3]);
-+    };
-+
-+    auto writeBigEndian = [&](size_t offset, uint32_t value)
-+    {
-+        data[offset] = uint8_t(value >> 24);
-+        data[offset + 1] = uint8_t(value >> 16);
-+        data[offset + 2] = uint8_t(value >> 8);
-+        data[offset + 3] = uint8_t(value);
-+    };
-+
-+    bool changed = false;
-+    if (readBigEndian(0x10) < 8)
-+    {
-+        writeBigEndian(0x10, 8);
-+        changed = true;
-+    }
-+    if (readBigEndian(0x1C) < 4)
-+    {
-+        writeBigEndian(0x1C, 4);
-+        changed = true;
-+    }
-+    if (!changed)
-+        return true;
-+
-+    const std::filesystem::path backupPath = savePath.parent_path() / "SYS-DATA.pre-arcade";
-+    std::error_code ec;
-+    if (!std::filesystem::exists(backupPath))
-+    {
-+        std::filesystem::copy_file(savePath, backupPath, std::filesystem::copy_options::none, ec);
-+        if (ec)
-+            return false;
-+    }
-+
-+    std::ofstream output(savePath, std::ios::binary | std::ios::trunc);
-+    if (!output.good())
-+        return false;
-+    output.write(reinterpret_cast<const char*>(data.data()), data.size());
-+    return output.good();
-+#else
-+    return true;
-+#endif
-+}
 diff --git a/UnleashedRecomp/user/paths.h b/UnleashedRecomp/user/paths.h
-index ecb3e04..b9a9424 100644
+index ecb3e04..b6c2d2f 100644
 --- a/UnleashedRecomp/user/paths.h
 +++ b/UnleashedRecomp/user/paths.h
-@@ -13,18 +13,9 @@ extern std::filesystem::path g_executableRoot;
+@@ -13,18 +13,8 @@ extern std::filesystem::path g_executableRoot;
  bool CheckPortable();
  std::filesystem::path BuildUserPath();
  const std::filesystem::path& GetUserPath();
@@ -2559,7 +2614,6 @@ index ecb3e04..b9a9424 100644
 -}
 +std::filesystem::path GetGamePath();
 +bool SeedBundledSaveData();
-+bool PrepareArcadeSaveData();
  
  inline std::filesystem::path GetSavePath(bool checkForMods)
  {
@@ -2576,15 +2630,28 @@ index 6b656c9..bfcc039 100644
          -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/host-tools/install
          -DUNLEASHED_RECOMP=ON
 diff --git a/UnleashedRecompLib/config/SWA.toml b/UnleashedRecompLib/config/SWA.toml
-index 5063e71..07d1536 100644
+index 5063e71..8c084c8 100644
 --- a/UnleashedRecompLib/config/SWA.toml
 +++ b/UnleashedRecompLib/config/SWA.toml
-@@ -1153,3 +1153,21 @@ registers = ["f1"]
+@@ -1153,3 +1153,34 @@ registers = ["f1"]
  name = "CEvilSonicContext_CStateWall_LeaveRotationMidAsmHook"
  address = 0x82406774
  registers = ["f1"]
 +
 +# Day Stage Arcade: force both retail life setters down their store-99 path.
++# After rank Next, use the native EXP-exit completion message directly.
++[[midasm_hook]]
++name = "ArcadeFinishRankMidAsmHook"
++address = 0x824A0C8C
++registers = ["r31"]
++jump_address_on_true = 0x824A0D40
++
++[[midasm_hook]]
++name = "ArcadeSkipRankPauseMidAsmHook"
++address = 0x824A0D48
++jump_address_on_true = 0x824A0D50
++
++# Keep the existing infinite-life setter behavior.
 +[[midasm_hook]]
 +name = "ArcadeForceLivesMidAsmHook"
 +address = 0x8251A740
@@ -2885,10 +2952,10 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..06d96bf
+index 0000000..b6888e6
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
-@@ -0,0 +1,456 @@
+@@ -0,0 +1,473 @@
 +#include <api/SWA.h>
 +#include <cpu/guest_stack_var.h>
 +#include <kernel/function.h>
@@ -2917,6 +2984,23 @@ index 0000000..06d96bf
 +PPC_FUNC_IMPL(__imp__sub_8252CCD8);
 +PPC_FUNC_IMPL(__imp__sub_82B4E608);
 +PPC_FUNC_IMPL(__imp__sub_8256D338);
++PPC_FUNC_IMPL(__imp__sub_82486258);
++
++// CWorldMapCamera reads the separate raw pad (83361F5C), outside the stage
++// list's cached-input scope. Its +E8 flag skips only joystick rotation
++// (824862BC..82486350), preserving camera transitions, flags and starfield.
++PPC_FUNC(sub_82486258)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const uint32_t camera = ctx.r3.u32;
++    const uint8_t saved = base[camera + 0xE8];
++    base[camera + 0xE8] = 1;
++    __imp__sub_82486258(ctx, base);
++    base[camera + 0xE8] = saved;
++#else
++    __imp__sub_82486258(ctx, base);
++#endif
++}
 +
 +namespace
 +{

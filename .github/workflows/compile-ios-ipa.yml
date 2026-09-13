@@ -107,6 +107,7 @@ jobs:
                   b"IOS-LOADING ExitLoading entered",
                   b"Arcade native: opened country",
                   b"Arcade native: country",
+                  b"iOS lifecycle: rebuilding drawable at safe frame boundary",
               )
               missing_markers = [marker.decode() for marker in markers if marker not in executable]
               assert not missing_markers, f"Missing iOS runtime fixes: {missing_markers}"

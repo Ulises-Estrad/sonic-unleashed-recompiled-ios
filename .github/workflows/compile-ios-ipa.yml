@@ -70,6 +70,14 @@ jobs:
           python3 - <<'PY'
           import plistlib
           import zipfile
+          import json
+          from pathlib import Path
+
+          commands = [entry for path in Path('.').rglob('host-tools/XenosRecomp/compile_commands.json')
+                      for entry in json.loads(path.read_text())
+                      if entry['file'].endswith('shader_recompiler.cpp')]
+          assert commands, 'Missing host shader compiler build evidence'
+          assert all('-DUNLEASHED_RECOMP' in entry['command'] for entry in commands), 'Unleashed shader specializations disabled'
 
           ipa = "out/Sonic-Unleashed.ipa"
           prefix = "Payload/Sonic Unleashed.app/"
@@ -97,6 +105,8 @@ jobs:
                   b"Sonic-Unleashed-stderr.log",
                   b"File open failed: guest=",
                   b"IOS-LOADING ExitLoading entered",
+                  b"Arcade native: opened country",
+                  b"Arcade native: country",
               )
               missing_markers = [marker.decode() for marker in markers if marker not in executable]
               assert not missing_markers, f"Missing iOS runtime fixes: {missing_markers}"

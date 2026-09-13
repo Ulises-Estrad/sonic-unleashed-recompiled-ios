@@ -1,5 +1,5 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..5340eb3 100644
+index 6f3a2e7..ba781db 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
 @@ -1,5 +1,11 @@
@@ -22,15 +22,7 @@ index 6f3a2e7..5340eb3 100644
      "patches/audio_patches.cpp"
      "patches/camera_patches.cpp"
      "patches/CGameModeStageTitle_patches.cpp"
-@@ -177,6 +184,7 @@ set(UNLEASHED_RECOMP_PATCHES_CXX_SOURCES
- 
- set(UNLEASHED_RECOMP_UI_CXX_SOURCES
-     "ui/achievement_menu.cpp"
-+    "ui/arcade_menu.cpp"
-     "ui/achievement_overlay.cpp"
-     "ui/black_bar.cpp"
-     "ui/button_guide.cpp"
-@@ -187,6 +195,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
+@@ -187,6 +194,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
      "ui/message_window.cpp"
      "ui/options_menu.cpp"
      "ui/options_menu_thumbnails.cpp"
@@ -38,7 +30,7 @@ index 6f3a2e7..5340eb3 100644
      "ui/tv_static.cpp"
  )
  
-@@ -332,15 +341,18 @@ elseif(APPLE)
+@@ -332,15 +340,18 @@ elseif(APPLE)
          OUTPUT_VAR MACOS_BUNDLE_VERSION
      )
  
@@ -60,7 +52,7 @@ index 6f3a2e7..5340eb3 100644
              MACOSX_BUNDLE_BUNDLE_VERSION ${IOS_BUNDLE_VERSION}
              MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
              XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-@@ -485,10 +497,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+@@ -485,10 +496,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -199,18 +191,10 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..3e46b15 100644
+index 0205276..8ef7b29 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -19,6 +19,7 @@
- #include <shader/shader_cache.h>
- #include <SWA.h>
- #include <ui/achievement_menu.h>
-+#include <ui/arcade_menu.h>
- #include <ui/achievement_overlay.h>
- #include <ui/button_guide.h>
- #include <ui/fader.h>
-@@ -28,6 +29,7 @@
+@@ -28,6 +28,7 @@
  #include <ui/options_menu.h>
  #include <ui/game_window.h>
  #include <ui/black_bar.h>
@@ -218,7 +202,7 @@ index 0205276..3e46b15 100644
  #include <patches/aspect_ratio_patches.h>
  #include <user/config.h>
  #include <sdl_listener.h>
-@@ -430,6 +432,24 @@ static Mutex g_pipelineCacheMutex;
+@@ -430,6 +431,24 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -243,7 +227,7 @@ index 0205276..3e46b15 100644
  enum class PipelineTaskType
  {
      Null,
-@@ -1428,6 +1448,7 @@ static void CreateImGuiBackend()
+@@ -1428,6 +1447,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -251,15 +235,7 @@ index 0205276..3e46b15 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2668,6 +2689,7 @@ static void DrawImGui()
-     ImGui::End();
- #endif
- 
-+    ArcadeMenu::Draw();
-     AchievementMenu::Draw();
-     OptionsMenu::Draw();
-     AchievementOverlay::Draw();
-@@ -2676,6 +2698,8 @@ static void DrawImGui()
+@@ -2676,6 +2696,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -268,7 +244,7 @@ index 0205276..3e46b15 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -2882,8 +2906,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2904,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -327,7 +303,7 @@ index 0205276..3e46b15 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2971,6 +3045,9 @@ void Video::Present()
+@@ -2971,6 +3043,9 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
@@ -337,7 +313,7 @@ index 0205276..3e46b15 100644
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3169,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3167,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -347,7 +323,7 @@ index 0205276..3e46b15 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -6398,6 +6478,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6398,6 +6476,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
  #endif
  )
  {
@@ -358,7 +334,7 @@ index 0205276..3e46b15 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6493,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6409,6 +6491,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      cmd.addPipeline.hash = pipelineHash;
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
@@ -369,7 +345,7 @@ index 0205276..3e46b15 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6602,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6514,6 +6600,9 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.token = tokenPair.sharedToken;
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
@@ -379,7 +355,7 @@ index 0205276..3e46b15 100644
  #endif
              g_pipelineStateQueue.enqueue(queueItem);
          }
-@@ -7086,27 +7177,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7175,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -437,7 +413,7 @@ index 0205276..3e46b15 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7394,9 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7392,9 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -447,7 +423,7 @@ index 0205276..3e46b15 100644
  
      while (true)
      {
-@@ -7291,6 +7415,12 @@ static void PipelineTaskConsumerThread()
+@@ -7291,6 +7413,12 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -460,7 +436,7 @@ index 0205276..3e46b15 100644
  
          for (auto& [type, databaseData] : localPipelineTaskQueue)
          {
-@@ -7358,6 +7488,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7486,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -482,7 +458,7 @@ index 0205276..3e46b15 100644
                  }
  
                  break;
-@@ -7515,6 +7660,17 @@ static void PipelineTaskConsumerThread()
+@@ -7515,6 +7658,17 @@ static void PipelineTaskConsumerThread()
              }
          }
  
@@ -969,31 +945,18 @@ index 8a284b9..84292cf 100644
      #else
          if (func)
 diff --git a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
-index 61ac40d..f45adc4 100644
+index 61ac40d..05f350b 100644
 --- a/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
 +++ b/UnleashedRecomp/patches/CTitleStateMenu_patches.cpp
-@@ -6,6 +6,7 @@
- #include <ui/fader.h>
- #include <ui/message_window.h>
- #include <ui/options_menu.h>
-+#include <ui/arcade_menu.h>
- #include <user/achievement_manager.h>
- #include <user/paths.h>
- #include <app.h>
-@@ -15,6 +16,12 @@ static bool g_installMessageOpen = false;
+@@ -15,6 +15,7 @@ static bool g_installMessageOpen = false;
  static bool g_installMessageFaderBegun = false;
  static int g_installMessageResult = -1;
  
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+static SWA::CTitleStateMenu* g_arcadeTitleMenu = nullptr;
-+static uint32_t g_arcadeTitleFrames = 0;
-+static bool g_arcadeTitleMenuAccepted = false;
-+#endif
 +
  #if TARGET_OS_IOS
  #include <CoreFoundation/CoreFoundation.h>
  
-@@ -73,7 +80,7 @@ PPC_FUNC(sub_825882B8)
+@@ -73,17 +74,26 @@ PPC_FUNC(sub_825882B8)
      auto pGameDocument = SWA::CGameDocument::GetInstance();
  
      auto pInputState = SWA::CInputState::GetInstance();
@@ -1002,64 +965,109 @@ index 61ac40d..f45adc4 100644
      auto isAccepted = pPadState.IsTapped(SWA::eKeyState_A) || pPadState.IsTapped(SWA::eKeyState_Start);
  
      auto pContext = pTitleStateMenu->GetContextBase<SWA::CTitleStateMenu::CTitleStateMenuContext>();
-@@ -81,6 +88,55 @@ PPC_FUNC(sub_825882B8)
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // Keep the retail menu and its analogue-stick repeat/animation handling.
++    // The original entries 1 and 2 are Continue and Options respectively.
++    if (pContext->m_pTitleMenu->m_CursorIndex != 1 &&
++        pContext->m_pTitleMenu->m_CursorIndex != 2)
++        pContext->m_pTitleMenu->m_CursorIndex = 1;
++#endif
+     auto isNewGameIndex = pContext->m_pTitleMenu->m_CursorIndex == 0;
      auto isOptionsIndex = pContext->m_pTitleMenu->m_CursorIndex == 2;
      auto isInstallIndex = pContext->m_pTitleMenu->m_CursorIndex == 3;
  
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    if (g_arcadeTitleMenu != pTitleStateMenu || ArcadeMenu::resetTitle.exchange(false))
-+    {
-+        g_arcadeTitleMenu = pTitleStateMenu;
-+        g_arcadeTitleMenuAccepted = false;
-+        g_arcadeTitleFrames = 0;
-+        ArcadeMenu::selection.store(0);
-+    }
-+
-+    if (!g_arcadeTitleMenuAccepted)
-+    {
-+        ArcadeMenu::visible.store(true);
-+        if (OptionsMenu::s_isVisible)
-+        {
-+            if (OptionsMenu::CanClose() && pPadState.IsTapped(SWA::eKeyState_B))
-+                OptionsMenu::Close();
-+            return;
-+        }
-+        if (pPadState.IsTapped(SWA::eKeyState_DpadUp) ||
-+            pPadState.IsTapped(SWA::eKeyState_DpadDown) ||
-+            pPadState.IsTapped(SWA::eKeyState_LeftStickUp) ||
-+            pPadState.IsTapped(SWA::eKeyState_LeftStickDown))
-+            ArcadeMenu::selection.store(1 - ArcadeMenu::selection.load());
-+
-+        int choice = ArcadeMenu::requestedChoice.exchange(-1);
-+        if (++g_arcadeTitleFrames < 12)
-+            choice = -1;
-+        else if (isAccepted)
-+            choice = ArcadeMenu::selection.load();
-+        if (choice == 1)
-+        {
-+            OptionsMenu::Open();
-+            return;
-+        }
-+        const SWA::SPadState savedPad = pPadState;
-+        pPadState = {};
-+        pContext->m_pTitleMenu->m_CursorIndex = 1;
-+        if (choice == 0)
-+        {
-+            pPadState.TappedState = SWA::eKeyState_A;
-+            ArcadeMenu::visible.store(false);
-+            g_arcadeTitleMenuAccepted = true;
-+        }
-+        __imp__sub_825882B8(ctx, base);
-+        pPadState = savedPad;
-+        return;
-+    }
-+#endif
-+
      // Always default to New Game with corrupted save data.
++#if !defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
      if (App::s_isSaveDataCorrupt && pContext->m_pTitleMenu->m_CursorIndex == 1)
          pContext->m_pTitleMenu->m_CursorIndex = 0;
++#endif
+ 
+     if (isNewGameIndex && isAccepted)
+     {
+@@ -144,5 +154,23 @@ void TitleMenuRemoveStorageDeviceOptionMidAsmHook(PPCRegister& r11)
+ 
+ void TitleMenuAddInstallOptionMidAsmHook(PPCRegister& r3)
+ {
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    r3.u32 = 0;
++#else
+     r3.u32 = 1;
++#endif
++}
++
++// The retail cursor loop calls this predicate until it reaches an enabled row.
++// Restrict it here instead of replacing analogue-stick input with tapped bits.
++PPC_FUNC_IMPL(__imp__sub_82585440);
++PPC_FUNC(sub_82585440)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    auto* menu = reinterpret_cast<SWA::CTitleMenu*>(base + ctx.r3.u32);
++    const uint32_t index = menu->m_CursorIndex;
++    ctx.r3.u64 = index == 1 || index == 2;
++#else
++    __imp__sub_82585440(ctx, base);
++#endif
+ }
+diff --git a/UnleashedRecomp/patches/aspect_ratio_patches.cpp b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
+index 02f49ee..85ff212 100644
+--- a/UnleashedRecomp/patches/aspect_ratio_patches.cpp
++++ b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
+@@ -5,6 +5,8 @@
+ #include <ui/black_bar.h>
+ #include <gpu/video.h>
+ #include <xxHashMap.h>
++#include <set>
++#include "arcade_selector.h"
+ 
+ #include "aspect_ratio_patches.h"
+ #include "camera_patches.h"
+@@ -78,6 +80,9 @@ namespace Chao::CSD
+ 
+ static Mutex g_pathMutex;
+ static std::map<const void*, XXH64_hash_t> g_paths;
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++static std::set<XXH64_hash_t> g_arcadeHiddenTitlePaths;
++#endif
+ 
+ static XXH64_hash_t HashStr(const std::string_view& value)
+ {
+@@ -88,6 +93,14 @@ static void EmplacePath(const void* key, const std::string_view& value)
+ {
+     std::lock_guard lock(g_pathMutex);
+     g_paths.emplace(key, HashStr(value));
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // Names come from the retail ui_title.yncp, not a replacement overlay.
++    // Include descendants so child draw modifiers cannot restore a hidden row.
++    if (value.starts_with("ui_title/") &&
++        (value.ends_with("/new_game") || value.find("/new_game/") != std::string_view::npos ||
++         value.ends_with("/install") || value.find("/install/") != std::string_view::npos))
++        g_arcadeHiddenTitlePaths.insert(HashStr(value));
++#endif
+ }
+ 
+ static void TraverseCast(Chao::CSD::Scene* scene, uint32_t castNodeIndex, Chao::CSD::CastNode* castNode, uint32_t castIndex, const std::string& parentPath)
+@@ -257,7 +270,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
+ PPC_FUNC(sub_8258B558)
+ {
+     auto r3 = ctx.r3;
+-    __imp__sub_8258B558(ctx, base);
++    ArcadeWorldMapUpdate(ctx, base);
+ 
+     uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
+     if (worldMapSimpleInfo != NULL)
+@@ -801,6 +814,10 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
+             return {};
+ 
+         path = findResult->second;
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++        if (g_arcadeHiddenTitlePaths.contains(path))
++            return CsdModifier{ SKIP };
++#endif
+     }
+ 
+     auto findResult = g_modifiers.find(path);
 diff --git a/UnleashedRecomp/patches/misc_patches.cpp b/UnleashedRecomp/patches/misc_patches.cpp
-index ec4e1a8..a43bcf7 100644
+index ec4e1a8..a49ffba 100644
 --- a/UnleashedRecomp/patches/misc_patches.cpp
 +++ b/UnleashedRecomp/patches/misc_patches.cpp
 @@ -41,7 +41,11 @@ bool DisableEvilControlTutorialMidAsmHook(PPCRegister& r4, PPCRegister& r5)
@@ -1074,6 +1082,20 @@ index ec4e1a8..a43bcf7 100644
  }
  
  void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
+@@ -114,8 +118,13 @@ PPC_FUNC(sub_8305D5B8)
+ PPC_FUNC_IMPL(__imp__sub_82586698);
+ PPC_FUNC(sub_82586698)
+ {
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    // Skip the acknowledgement, not the actual autosave operation.
++    *(bool*)g_memory.Translate(0x83367BC2) = true;
++#else
+     if (Config::DisableAutoSaveWarning)
+         *(bool*)g_memory.Translate(0x83367BC2) = true;
++#endif
+ 
+     __imp__sub_82586698(ctx, base);
+ }
 diff --git a/UnleashedRecomp/patches/player_patches.cpp b/UnleashedRecomp/patches/player_patches.cpp
 index cce0a58..88f54cf 100644
 --- a/UnleashedRecomp/patches/player_patches.cpp
@@ -1352,7 +1374,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..4fefb98 100644
+index d9130f4..4485759 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1360,7 +1382,7 @@ index d9130f4..4fefb98 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=6
++VERSION_REVISION=7
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..87a4553 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -2269,6 +2291,18 @@ index ecb3e04..b9a9424 100644
  
  inline std::filesystem::path GetSavePath(bool checkForMods)
  {
+diff --git a/UnleashedRecompLib/CMakeLists.txt b/UnleashedRecompLib/CMakeLists.txt
+index 6b656c9..bfcc039 100644
+--- a/UnleashedRecompLib/CMakeLists.txt
++++ b/UnleashedRecompLib/CMakeLists.txt
+@@ -148,6 +148,7 @@ else()
+         COMMAND
+         ${CMAKE_COMMAND} -S "${CMAKE_SOURCE_DIR}/tools/XenosRecomp" -B "${HOST_XENOSRECOMP_BUILD_DIR}"
+         -G "${CMAKE_GENERATOR}"
++        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/host-tools/install
+         -DUNLEASHED_RECOMP=ON
 diff --git a/UnleashedRecompLib/config/SWA.toml b/UnleashedRecompLib/config/SWA.toml
 index 5063e71..07d1536 100644
 --- a/UnleashedRecompLib/config/SWA.toml
@@ -2579,112 +2613,306 @@ index 0000000..3a66070
 +printf '%s\n' "$IPA_PATH"
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
-index 0000000..d5efae3
+index 0000000..e621bc1
 --- /dev/null
 +++ b/UnleashedRecomp/patches/arcade_selector_patches.cpp
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,222 @@
 +#include <api/SWA.h>
++#include <cpu/guest_stack_var.h>
 +#include <kernel/function.h>
 +#include <os/logger.h>
 +#include <ui/options_menu.h>
-+#include <ui/arcade_menu.h>
++#include "arcade_selector.h"
++#include "arcade_native_catalog.h"
 +
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++PPC_FUNC_IMPL(__imp__sub_8258B558);
++PPC_FUNC_IMPL(__imp__sub_8256E9F0);
++PPC_FUNC_IMPL(__imp__sub_82570610);
++PPC_FUNC_IMPL(__imp__sub_82573F88);
++PPC_FUNC_IMPL(__imp__sub_8251F900);
++
 +namespace
 +{
-+    uint32_t selectorOwner = 0;
-+    uint32_t countryVector = 0;
-+    uint32_t countryIndex = 0;
++    unsigned countryIndex = 0;
++    bool insideWorldMap = false;
++    uint32_t currentCore = 0;
 +
-+    // Retail Select.xml parser: categories are shared_ptr entries (8 bytes)
-+    // in a vector at +8/+12. Verified from 8254EA58 and 82550548.
-+    void ShowCountry(PPCContext& ctx, uint8_t* base, uint32_t owner)
++    const ArcadeNative::Stage* FindStage(const char* sequence)
 +    {
-+        const uint32_t country = PPC_LOAD_U32(countryVector + countryIndex * 8);
-+        const uint32_t display = PPC_LOAD_U32(owner + 0x238);
-+        if (!country || !display)
-+            return;
-+        const PPCContext saved = ctx;
-+        PPC_STORE_U32(owner + 0x22C, country);
-+        PPC_STORE_U32(owner + 0x230, 1);
-+        ctx.r3.u32 = display + 0xC;
-+        sub_822CE648(ctx, base); // Clear the previous displayed rows.
-+        ctx.r3.u32 = owner;
-+        ctx.r4.u32 = country;
-+        sub_8254EA58(ctx, base); // Rebuild from this country's stage vector.
-+        ctx = saved;
-+        LOGFN("Arcade selector: country index {}", countryIndex);
++        if (sequence)
++            for (const auto& stage : ArcadeNative::stages)
++                if (stage.sequence == sequence)
++                    return &stage;
++        return nullptr;
 +    }
-+}
-+#endif
 +
-+PPC_FUNC_IMPL(__imp__sub_825502C8);
-+PPC_FUNC(sub_825502C8)
-+{
-+    const uint32_t owner = ctx.r3.u32;
-+    __imp__sub_825502C8(ctx, base);
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    selectorOwner = 0;
-+    ArcadeMenu::resetTitle.store(true);
-+    const uint32_t root = PPC_LOAD_U32(owner + 0x22C);
-+    if (!root)
-+        return;
-+    const uint32_t begin = PPC_LOAD_U32(root + 8);
-+    const uint32_t end = PPC_LOAD_U32(root + 12);
-+    if (!begin || end < begin || end - begin != 9 * 8)
++    const char* GuestString(uint8_t* base, uint32_t field)
 +    {
-+        LOGFN("{}", "Arcade selector: expected nine countries; XML override not active");
-+        return;
++        const uint32_t address = PPC_LOAD_U32(field);
++        return address ? reinterpret_cast<const char*>(base + address) : nullptr;
 +    }
-+    selectorOwner = owner;
-+    countryVector = begin;
-+    ArcadeMenu::visible.store(false);
-+    ShowCountry(ctx, base, owner);
-+#endif
-+}
 +
-+PPC_FUNC_IMPL(__imp__sub_8254CEB8);
-+PPC_FUNC(sub_8254CEB8)
-+{
-+#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
-+    if (ctx.r3.u32 == selectorOwner)
++    // Retail list vector at +0x100: 0x3C-byte rows, display string at +0,
++    // launch sequence at +4. Confirmed by 82570818/40/68 and 8256DC98.
++    void ApplyCatalog(PPCContext& ctx, uint8_t* base, uint32_t owner, unsigned country)
 +    {
-+        auto* input = SWA::CInputState::GetInstance();
-+        if (input)
++        const uint32_t begin = PPC_LOAD_U32(owner + 0x104);
++        const uint32_t end = PPC_LOAD_U32(owner + 0x108);
++        if (!begin || end < begin || (end - begin) % 0x3C || end - begin > 256 * 0x3C)
 +        {
-+            auto& pad = const_cast<SWA::SPadState&>(input->GetPadState());
-+            const SWA::SPadState saved = pad;
-+            if (OptionsMenu::s_isVisible)
-+            {
-+                if (OptionsMenu::CanClose() && pad.IsTapped(SWA::eKeyState_B))
-+                    OptionsMenu::Close();
-+                pad = {};
-+            }
-+            else if (pad.IsTapped(SWA::eKeyState_Start))
-+            {
-+                OptionsMenu::Open();
-+                pad = {};
-+            }
-+            else
-+            {
-+                const bool previous = pad.IsTapped(SWA::eKeyState_LeftBumper) || pad.IsTapped(SWA::eKeyState_DpadLeft);
-+                const bool next = pad.IsTapped(SWA::eKeyState_RightBumper) || pad.IsTapped(SWA::eKeyState_DpadRight);
-+                if (previous || next)
-+                {
-+                    countryIndex = (countryIndex + (previous ? 8 : 1)) % 9;
-+                    ShowCountry(ctx, base, selectorOwner);
-+                    pad = {};
-+                }
-+                // Country browsing never returns to the debug category tree.
-+                pad.TappedState = uint32_t(pad.TappedState) & ~uint32_t(SWA::eKeyState_B);
-+            }
-+            __imp__sub_8254CEB8(ctx, base);
-+            pad = saved;
++            LOGFN("Arcade native: invalid list for country {}", country);
 +            return;
 +        }
++        uint32_t kept = 0;
++        for (const auto& stage : ArcadeNative::stages)
++        {
++            if (stage.country != country)
++                continue;
++            uint32_t found = end;
++            for (uint32_t entry = begin + kept * 0x3C; entry < end; entry += 0x3C)
++            {
++                const char* sequence = GuestString(base, entry + 4);
++                if (sequence && stage.sequence == sequence) { found = entry; break; }
++            }
++            if (found == end)
++            {
++                LOGFN("Arcade native: missing sequence {}", stage.sequence);
++                continue;
++            }
++            const uint32_t target = begin + kept++ * 0x3C;
++            if (found != target)
++            {
++                std::array<uint8_t, 0x3C> temporary;
++                memcpy(temporary.data(), base + target, temporary.size());
++                memcpy(base + target, base + found, temporary.size());
++                memcpy(base + found, temporary.data(), temporary.size());
++            }
++            const PPCContext saved = ctx;
++            {
++                guest_stack_var<Hedgehog::Base::CSharedString> label(stage.label);
++                ctx.r3.u32 = target;
++                ctx.r4.u32 = g_memory.MapVirtual(label.get());
++                sub_82DFB8F0(ctx, base);
++            }
++            ctx = saved;
++        }
++        if (kept == 0)
++        {
++            LOGFN("Arcade native: no catalog matches for country {}; retaining daytime list for diagnosis", country);
++            return;
++        }
++        // Native vector erase releases rejected bosses/missions properly.
++        if (begin + kept * 0x3C != end)
++        {
++            const PPCContext saved = ctx;
++            {
++                guest_stack_var<uint32_t> iterator;
++                ctx.r3.u32 = g_memory.MapVirtual(iterator.get());
++                ctx.r4.u32 = owner + 0x100;
++                ctx.r5.u32 = begin + kept * 0x3C;
++                ctx.r6.u32 = end;
++                sub_8256DC98(ctx, base);
++            }
++            ctx = saved;
++        }
++        PPC_STORE_U32(owner + 0x1C, 0);
++        PPC_STORE_U32(owner + 0x20, 0);
++        PPC_STORE_U32(owner + 0x30, kept);
++        LOGFN("Arcade native: country {} contains {} day acts", country, kept);
++    }
++}
++
++PPC_FUNC(sub_8251F900)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (FindStage(GuestString(base, ctx.r3.u32)))
++    {
++        ctx.r3.u64 = 1;
++        return;
 +    }
 +#endif
-+    __imp__sub_8254CEB8(ctx, base);
++    __imp__sub_8251F900(ctx, base);
++}
++
++PPC_FUNC(sub_82570610)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    ctx.r5.u32 = 1; // Native CWorldMapMission::Open(country, daytime).
++#endif
++    __imp__sub_82570610(ctx, base);
++}
++
++PPC_FUNC(sub_8256E9F0)
++{
++    const uint32_t owner = ctx.r3.u32;
++    const unsigned country = ctx.r4.u32;
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    ctx.r5.u32 = 1;
++#endif
++    __imp__sub_8256E9F0(ctx, base);
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (country < 9) ApplyCatalog(ctx, base, owner, country);
++#endif
++}
++
++PPC_FUNC(sub_82573F88)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    if (insideWorldMap && ctx.r3.u32 == currentCore)
++    {
++        ctx.r3.u64 = ArcadeNative::countryOrder[countryIndex];
++        return;
++    }
++#endif
++    __imp__sub_82573F88(ctx, base);
++}
++
++void ArcadeWorldMapUpdate(PPCContext& ctx, uint8_t* base)
++{
++#if defined(UNLEASHED_RECOMP_DAY_STAGE_ARCADE)
++    const uint32_t owner = ctx.r3.u32;
++    auto* input = SWA::CInputState::GetInstance();
++    auto* pad = input ? &const_cast<SWA::SPadState&>(input->GetPadState()) : nullptr;
++    const SWA::SPadState savedPad = pad ? *pad : SWA::SPadState{};
++    const uint32_t state = PPC_LOAD_U32(owner + 0x94);
++    const uint32_t mission = PPC_LOAD_U32(owner + 0x80);
++    if (state == 3 && mission && pad)
++    {
++        if (OptionsMenu::s_isVisible)
++        {
++            if (OptionsMenu::CanClose() && pad->IsTapped(SWA::eKeyState_B)) OptionsMenu::Close();
++            *pad = {};
++        }
++        else if (pad->IsTapped(SWA::eKeyState_Start))
++        {
++            OptionsMenu::Open();
++            *pad = {};
++        }
++        else
++        {
++            const bool previous = pad->IsTapped(SWA::eKeyState_LeftBumper);
++            const bool next = pad->IsTapped(SWA::eKeyState_RightBumper);
++            if (previous || next)
++            {
++                countryIndex = (countryIndex + (previous ? 8 : 1)) % 9;
++                const unsigned country = ArcadeNative::countryOrder[countryIndex];
++                PPC_STORE_U32(owner + 0xBC, country);
++                PPC_STORE_U32(owner + 0xA4, country);
++                const PPCContext saved = ctx;
++                ctx.r3.u32 = mission;
++                ctx.r4.u32 = country;
++                ctx.r5.u32 = 1;
++                sub_82570610(ctx, base);
++                ctx = saved;
++                *pad = {};
++            }
++            pad->TappedState = uint32_t(pad->TappedState) & ~uint32_t(SWA::eKeyState_B);
++        }
++    }
++    insideWorldMap = true;
++    __imp__sub_8258B558(ctx, base);
++    insideWorldMap = false;
++    if (pad) *pad = savedPad;
++
++    // Wait for the retail resources before using its own Select Stage transition.
++    const PPCContext saved = ctx;
++    ctx.r3.u32 = owner;
++    sub_8315CF68(ctx, base);
++    const uint32_t context = ctx.r3.u32;
++    currentCore = context ? PPC_LOAD_U32(context + 0x178) : 0;
++    if (currentCore && PPC_LOAD_U32(owner + 0x60) && PPC_LOAD_U32(owner + 0x68) &&
++        PPC_LOAD_U32(owner + 0x80) && PPC_LOAD_U32(owner + 0x94) == 1)
++    {
++        const unsigned country = ArcadeNative::countryOrder[countryIndex];
++        PPC_STORE_U32(owner + 0xBC, country);
++        PPC_STORE_U32(owner + 0xA4, country);
++        ctx.r3.u32 = owner;
++        ctx.r4.u32 = 0;
++        sub_82588A08(ctx, base);
++        ctx.r3.u32 = owner;
++        ctx.r4.u32 = 3;
++        sub_82589670(ctx, base);
++        LOGFN("Arcade native: opened country {} directly", country);
++    }
++    ctx = saved;
++#else
++    __imp__sub_8258B558(ctx, base);
++#endif
++}
+diff --git a/UnleashedRecomp/patches/arcade_selector.h b/UnleashedRecomp/patches/arcade_selector.h
+new file mode 100644
+index 0000000..452f745
+--- /dev/null
++++ b/UnleashedRecomp/patches/arcade_selector.h
+@@ -0,0 +1,3 @@
++#pragma once
++#include <ppc_context.h>
++void ArcadeWorldMapUpdate(PPCContext& ctx, uint8_t* base);
+diff --git a/UnleashedRecomp/patches/arcade_native_catalog.h b/UnleashedRecomp/patches/arcade_native_catalog.h
+new file mode 100644
+index 0000000..9d9fa26
+--- /dev/null
++++ b/UnleashedRecomp/patches/arcade_native_catalog.h
+@@ -0,0 +1,60 @@
++#pragma once
++#include <array>
++#include <string_view>
++
++namespace ArcadeNative
++{
++struct Stage { unsigned country; unsigned order; std::string_view sequence; const char* label; };
++inline constexpr std::array<Stage, 48> stages{{
++    {0, 0, "GoToMykonosTutorial", "Act 1"},
++    {0, 1, "GoToMykonosAction", "Act 2"},
++    {0, 2, "PlayMykonosActionSub01", "Act 3"},
++    {0, 3, "PlayMykonosActionSub02", "Act 4"},
++    {0, 4, "PlayMykonosActionSub04", "Act 1 (Hard)"},
++    {0, 5, "PlayMykonosActionSub05", "Act 2 (Hard)"},
++    {2, 0, "GoToAfricaAction", "Act 1"},
++    {2, 1, "PlayAfricaActionSub01", "Act 2"},
++    {2, 2, "PlayAfricaActionSub03", "Act 3"},
++    {2, 3, "PlayAfricaActionSub02", "Act 4"},
++    {2, 4, "PlayAfricaActionSub04", "Act 5"},
++    {2, 5, "PlayAfricaActionSub05", "Act 1 (Hard)"},
++    {2, 6, "PlayAfricaActionSub06", "Act 3 (Hard)"},
++    {1, 0, "GoToEUAction", "Act 1"},
++    {1, 1, "PlayEUActionSub01", "Act 2"},
++    {1, 2, "PlayEUActionSub02", "Act 3"},
++    {1, 3, "PlayEUActionSub03", "Act 4"},
++    {1, 4, "PlayEUActionSub04", "Act 5"},
++    {1, 5, "PlayEUActionSub05", "Act 1 (Hard)"},
++    {1, 6, "PlayEUActionSub06", "Act 2 (Hard)"},
++    {3, 0, "GoToChinaAction", "Act 1"},
++    {3, 1, "PlayChinaActionSub03", "Act 2"},
++    {3, 2, "PlayChinaActionSub04", "Act 3"},
++    {3, 3, "PlayChinaActionSub01", "Act 4"},
++    {3, 4, "PlayChinaActionSub02", "Act 5"},
++    {3, 5, "PlayChinaActionSub05", "Act 1 (Hard)"},
++    {3, 6, "PlayChinaActionSub06", "Act 2 (Hard)"},
++    {6, 0, "GoToBeachAction", "Act 1"},
++    {6, 1, "PlayBeachActionSub02", "Act 2"},
++    {6, 2, "PlayBeachActionSub04", "Act 3"},
++    {6, 3, "PlayBeachActionSub01", "Act 4"},
++    {6, 4, "PlayBeachActionSub03", "Act 5"},
++    {6, 5, "PlayBeachActionSub05", "Act 1 (Hard)"},
++    {4, 0, "GoToSnowAction", "Act 1"},
++    {4, 1, "PlaySnowActionSub01", "Act 2"},
++    {4, 2, "PlaySnowActionSub02", "Act 3"},
++    {4, 3, "PlaySnowActionSub03", "Act 4"},
++    {4, 4, "PlaySnowActionSub04", "Act 1 (Hard)"},
++    {4, 5, "PlaySnowActionSub05", "Act 2 (Hard)"},
++    {5, 0, "GoToPetraAction", "Act 1"},
++    {5, 1, "PlayPetraActionSub03", "Act 2"},
++    {5, 2, "PlayPetraActionSub02", "Act 3"},
++    {5, 3, "PlayPetraActionSub04", "Act 1 (Hard)"},
++    {7, 0, "GoToNYAction", "Act 1"},
++    {7, 1, "PlayNYActionSub01", "Act 2"},
++    {7, 2, "PlayNYActionSub02", "Act 3"},
++    {7, 3, "PlayNYActionSub03", "Act 1 (Hard)"},
++    {8, 0, "GoToEggManLandAction", "Day Route"},
++}};
++inline constexpr std::array<unsigned, 9> countryOrder{0, 2, 1, 3, 6, 4, 5, 7, 8};
++inline constexpr std::array<const char*, 9> countryNames{"Apotos", "Spagonia", "Mazuri", "Chun-Nan", "Holoska", "Shamar", "Adabat", "Empire City", "Eggmanland"};
 +}
 diff --git a/UnleashedRecomp/ui/arcade_menu.cpp b/UnleashedRecomp/ui/arcade_menu.cpp
 new file mode 100644
@@ -2797,3 +3025,29 @@ index 2abe67c..e152038 100644
          description.driverVersion = 1; // Unavailable
          description.vendor = mtl->supportsFamily(MTL::GPUFamilyApple1) ? RenderDeviceVendor::APPLE : getRenderDeviceVendor(mtl->registryID());
          description.dedicatedVideoMemory = mtl->recommendedMaxWorkingSetSize();
+diff --git a/tools/XenosRecomp/XenosRecomp/CMakeLists.txt b/tools/XenosRecomp/XenosRecomp/CMakeLists.txt
+index b187f59..d516a1e 100644
+--- a/tools/XenosRecomp/XenosRecomp/CMakeLists.txt
++++ b/tools/XenosRecomp/XenosRecomp/CMakeLists.txt
+@@ -1,5 +1,7 @@
+ project(XenosRecomp)
+ 
++option(UNLEASHED_RECOMP "Enable Sonic Unleashed shader specializations" OFF)
++
+ if (WIN32)
+     option(XENOS_RECOMP_DXIL "Generate DXIL shader cache" ON)
+ endif()
+@@ -32,6 +34,13 @@ target_include_directories(XenosRecomp PRIVATE ${SMOLV_SOURCE_DIR})
+ 
+ target_precompile_headers(XenosRecomp PRIVATE pch.h)
+ 
++# The standalone host build used by iOS does not inherit the parent target's
++# compile definitions. A CMake cache variable alone does not define a C++ macro.
++if (UNLEASHED_RECOMP)
++    target_compile_definitions(XenosRecomp PRIVATE UNLEASHED_RECOMP)
++    message(STATUS "XenosRecomp: Sonic Unleashed shader specializations enabled")
++endif()
++
+ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+     target_compile_options(XenosRecomp PRIVATE -Wno-switch -Wno-unused-variable -Wno-null-arithmetic -fms-extensions)
+ endif()

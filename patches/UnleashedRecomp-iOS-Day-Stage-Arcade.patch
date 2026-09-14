@@ -199,7 +199,7 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..282c93d 100644
+index 0205276..76d3c99 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
 @@ -28,11 +28,18 @@
@@ -426,7 +426,7 @@ index 0205276..282c93d 100644
 +            LOGFN("IOS-PERF v1 frames={} elapsed_s={} present_ms={} update_ms={} render_ms={} fence_ms={} present_wait_ms={} acquire_ms={} thermal={} footprint_bytes={} memory_valid={} resolution={} fps_limit={} pipeline_active={}",
 +                samples, elapsed, sums[0] / samples, sums[1] / samples, sums[2] / samples,
 +                sums[3] / samples, sums[4] / samples, sums[5] / samples, thermal,
-+                memoryValid ? vm.phys_footprint : 0, memoryValid, Config::ResolutionScale, Config::FPS,
++                memoryValid ? vm.phys_footprint : 0, memoryValid, static_cast<float>(Config::ResolutionScale), static_cast<int>(Config::FPS),
 +                g_diagnosticPipelineActive.load(std::memory_order_relaxed));
 +            std::fill(std::begin(sums), std::end(sums), 0.0);
 +            samples = 0;

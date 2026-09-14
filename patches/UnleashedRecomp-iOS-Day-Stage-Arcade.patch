@@ -199,10 +199,10 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..c228f94 100644
+index 0205276..282c93d 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -28,6 +28,7 @@
+@@ -28,11 +28,18 @@
  #include <ui/options_menu.h>
  #include <ui/game_window.h>
  #include <ui/black_bar.h>
@@ -210,7 +210,18 @@ index 0205276..c228f94 100644
  #include <patches/aspect_ratio_patches.h>
  #include <user/config.h>
  #include <sdl_listener.h>
-@@ -430,6 +431,24 @@ static Mutex g_pipelineCacheMutex;
+ #include <xxHashMap.h>
+ #include <os/process.h>
++#ifdef UNLEASHED_RECOMP_IOS
++#include <user/paths.h>
++#include <objc/message.h>
++#include <objc/runtime.h>
++#include <mach/mach.h>
++#endif
+ 
+ #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
+ #include <magic_enum/magic_enum.hpp>
+@@ -430,6 +437,24 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -235,7 +246,7 @@ index 0205276..c228f94 100644
  enum class PipelineTaskType
  {
      Null,
-@@ -766,6 +785,7 @@ static void DestructTempResources()
+@@ -766,6 +791,7 @@ static void DestructTempResources()
  static std::thread::id g_presentThreadId = std::this_thread::get_id();
  static std::atomic<bool> g_readyForCommands;
  static std::atomic<bool> g_appSuspended = false;
@@ -243,7 +254,7 @@ index 0205276..c228f94 100644
  
  PPC_FUNC_IMPL(__imp__sub_824ECA00);
  PPC_FUNC(sub_824ECA00)
-@@ -1428,6 +1448,7 @@ static void CreateImGuiBackend()
+@@ -1428,6 +1454,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -251,7 +262,7 @@ index 0205276..c228f94 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2613,6 +2634,7 @@ static void DrawFPS()
+@@ -2613,6 +2640,7 @@ static void DrawFPS()
      drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
  }
  
@@ -259,7 +270,7 @@ index 0205276..c228f94 100644
  static void DrawImGui()
  {
      ImGui_ImplSDL2_NewFrame();
-@@ -2668,6 +2690,7 @@ static void DrawImGui()
+@@ -2668,6 +2696,7 @@ static void DrawImGui()
      ImGui::End();
  #endif
  
@@ -267,7 +278,7 @@ index 0205276..c228f94 100644
      AchievementMenu::Draw();
      OptionsMenu::Draw();
      AchievementOverlay::Draw();
-@@ -2676,6 +2699,8 @@ static void DrawImGui()
+@@ -2676,6 +2705,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -276,7 +287,7 @@ index 0205276..c228f94 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -2849,19 +2874,13 @@ static bool g_pendingWaitOnSwapChain = true;
+@@ -2849,19 +2880,13 @@ static bool g_pendingWaitOnSwapChain = true;
  
  void Video::HandleApplicationBackgroundState(bool isBackgrounded)
  {
@@ -303,7 +314,7 @@ index 0205276..c228f94 100644
  }
  
  void Video::WaitOnSwapChain()
-@@ -2882,8 +2901,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2907,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -362,7 +373,7 @@ index 0205276..c228f94 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2905,6 +2974,17 @@ void Video::Present()
+@@ -2905,6 +2980,17 @@ void Video::Present()
      g_executedCommandList.wait(false);
      g_executedCommandList = false;
  
@@ -380,17 +391,54 @@ index 0205276..c228f94 100644
      if (g_swapChainValid)
      {
          if (g_pendingWaitOnSwapChain)
-@@ -2971,6 +3051,9 @@ void Video::Present()
+@@ -2971,6 +3057,46 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
 +#ifdef UNLEASHED_RECOMP_IOS
++    // Opt-in diagnostics only: never alter pacing, rendering or gameplay.
++    // Atomic profiler samples are observational and may refer to adjacent frames.
++    static const bool performanceLogging = std::filesystem::exists(GetUserPath() / "performance-diagnostics.enabled");
++    if (performanceLogging)
++    {
++        static auto reportStart = std::chrono::steady_clock::now();
++        static uint64_t samples = 0;
++        static double sums[6]{};
++        const double values[] = { g_presentProfiler.value.load(), g_updateDirectorProfiler.value.load(),
++            g_renderDirectorProfiler.value.load(), g_frameFenceProfiler.value.load(),
++            g_presentWaitProfiler.value.load(), g_swapChainAcquireProfiler.value.load() };
++        for (size_t i = 0; i < 6; ++i)
++            sums[i] += values[i];
++        ++samples;
++        const auto now = std::chrono::steady_clock::now();
++        const double elapsed = std::chrono::duration<double>(now - reportStart).count();
++        if (elapsed >= 1.0)
++        {
++            // Public NSProcessInfo thermalState API, queried once per report.
++            const auto sendObject = reinterpret_cast<id (*)(id, SEL)>(objc_msgSend);
++            const auto sendInteger = reinterpret_cast<long (*)(id, SEL)>(objc_msgSend);
++            const id processInfo = sendObject(reinterpret_cast<id>(objc_getClass("NSProcessInfo")), sel_registerName("processInfo"));
++            const long thermal = sendInteger(processInfo, sel_registerName("thermalState"));
++            task_vm_info_data_t vm{};
++            mach_msg_type_number_t vmCount = TASK_VM_INFO_COUNT;
++            const bool memoryValid = task_info(mach_task_self(), TASK_VM_INFO,
++                reinterpret_cast<task_info_t>(&vm), &vmCount) == KERN_SUCCESS;
++            LOGFN("IOS-PERF v1 frames={} elapsed_s={} present_ms={} update_ms={} render_ms={} fence_ms={} present_wait_ms={} acquire_ms={} thermal={} footprint_bytes={} memory_valid={} resolution={} fps_limit={} pipeline_active={}",
++                samples, elapsed, sums[0] / samples, sums[1] / samples, sums[2] / samples,
++                sums[3] / samples, sums[4] / samples, sums[5] / samples, thermal,
++                memoryValid ? vm.phys_footprint : 0, memoryValid, Config::ResolutionScale, Config::FPS,
++                g_diagnosticPipelineActive.load(std::memory_order_relaxed));
++            std::fill(std::begin(sums), std::end(sums), 0.0);
++            samples = 0;
++            reportStart = now;
++        }
++    }
 +    g_diagnosticPresentCompleted.fetch_add(1, std::memory_order_relaxed);
 +#endif
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3175,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3218,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -400,7 +448,7 @@ index 0205276..c228f94 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -6398,6 +6484,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6398,6 +6527,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
  #endif
  )
  {
@@ -411,7 +459,7 @@ index 0205276..c228f94 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6499,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6409,6 +6542,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      cmd.addPipeline.hash = pipelineHash;
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
@@ -422,7 +470,7 @@ index 0205276..c228f94 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6608,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6514,6 +6651,9 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.token = tokenPair.sharedToken;
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
@@ -432,7 +480,7 @@ index 0205276..c228f94 100644
  #endif
              g_pipelineStateQueue.enqueue(queueItem);
          }
-@@ -7086,27 +7183,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7226,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -490,7 +538,7 @@ index 0205276..c228f94 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7400,9 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7443,9 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -500,7 +548,7 @@ index 0205276..c228f94 100644
  
      while (true)
      {
-@@ -7291,6 +7421,12 @@ static void PipelineTaskConsumerThread()
+@@ -7291,6 +7464,12 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -513,7 +561,7 @@ index 0205276..c228f94 100644
  
          for (auto& [type, databaseData] : localPipelineTaskQueue)
          {
-@@ -7358,6 +7494,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7537,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -535,7 +583,7 @@ index 0205276..c228f94 100644
                  }
  
                  break;
-@@ -7515,6 +7666,17 @@ static void PipelineTaskConsumerThread()
+@@ -7515,6 +7709,17 @@ static void PipelineTaskConsumerThread()
              }
          }
  

@@ -199,10 +199,10 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..76d3c99 100644
+index 0205276..efa694d 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -28,11 +28,18 @@
+@@ -28,11 +28,20 @@
  #include <ui/options_menu.h>
  #include <ui/game_window.h>
  #include <ui/black_bar.h>
@@ -217,11 +217,13 @@ index 0205276..76d3c99 100644
 +#include <objc/message.h>
 +#include <objc/runtime.h>
 +#include <mach/mach.h>
++#include <time.h>
++#include "pipeline_retry_policy.h"
 +#endif
  
  #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
  #include <magic_enum/magic_enum.hpp>
-@@ -430,6 +437,24 @@ static Mutex g_pipelineCacheMutex;
+@@ -430,6 +439,24 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -246,7 +248,7 @@ index 0205276..76d3c99 100644
  enum class PipelineTaskType
  {
      Null,
-@@ -766,6 +791,7 @@ static void DestructTempResources()
+@@ -766,6 +793,7 @@ static void DestructTempResources()
  static std::thread::id g_presentThreadId = std::this_thread::get_id();
  static std::atomic<bool> g_readyForCommands;
  static std::atomic<bool> g_appSuspended = false;
@@ -254,7 +256,7 @@ index 0205276..76d3c99 100644
  
  PPC_FUNC_IMPL(__imp__sub_824ECA00);
  PPC_FUNC(sub_824ECA00)
-@@ -1428,6 +1454,7 @@ static void CreateImGuiBackend()
+@@ -1428,6 +1456,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -262,7 +264,7 @@ index 0205276..76d3c99 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2613,6 +2640,7 @@ static void DrawFPS()
+@@ -2613,6 +2642,7 @@ static void DrawFPS()
      drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
  }
  
@@ -270,7 +272,7 @@ index 0205276..76d3c99 100644
  static void DrawImGui()
  {
      ImGui_ImplSDL2_NewFrame();
-@@ -2668,6 +2696,7 @@ static void DrawImGui()
+@@ -2668,6 +2698,7 @@ static void DrawImGui()
      ImGui::End();
  #endif
  
@@ -278,7 +280,7 @@ index 0205276..76d3c99 100644
      AchievementMenu::Draw();
      OptionsMenu::Draw();
      AchievementOverlay::Draw();
-@@ -2676,6 +2705,8 @@ static void DrawImGui()
+@@ -2676,6 +2707,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -287,7 +289,7 @@ index 0205276..76d3c99 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -2849,19 +2880,13 @@ static bool g_pendingWaitOnSwapChain = true;
+@@ -2849,19 +2882,13 @@ static bool g_pendingWaitOnSwapChain = true;
  
  void Video::HandleApplicationBackgroundState(bool isBackgrounded)
  {
@@ -314,7 +316,7 @@ index 0205276..76d3c99 100644
  }
  
  void Video::WaitOnSwapChain()
-@@ -2882,8 +2907,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2909,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -373,7 +375,7 @@ index 0205276..76d3c99 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2905,6 +2980,17 @@ void Video::Present()
+@@ -2905,6 +2982,17 @@ void Video::Present()
      g_executedCommandList.wait(false);
      g_executedCommandList = false;
  
@@ -391,7 +393,7 @@ index 0205276..76d3c99 100644
      if (g_swapChainValid)
      {
          if (g_pendingWaitOnSwapChain)
-@@ -2971,6 +3057,46 @@ void Video::Present()
+@@ -2971,6 +3059,46 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
@@ -438,7 +440,7 @@ index 0205276..76d3c99 100644
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3218,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3220,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -448,7 +450,7 @@ index 0205276..76d3c99 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -6398,6 +6527,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6398,6 +6529,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
  #endif
  )
  {
@@ -459,7 +461,7 @@ index 0205276..76d3c99 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6542,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6409,6 +6544,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      cmd.addPipeline.hash = pipelineHash;
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
@@ -470,7 +472,7 @@ index 0205276..76d3c99 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6651,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6514,6 +6653,9 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.token = tokenPair.sharedToken;
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
@@ -480,7 +482,7 @@ index 0205276..76d3c99 100644
  #endif
              g_pipelineStateQueue.enqueue(queueItem);
          }
-@@ -7086,27 +7226,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7228,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -538,21 +540,31 @@ index 0205276..76d3c99 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7443,9 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7445,11 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
 +#ifdef UNLEASHED_RECOMP_IOS
 +    std::chrono::steady_clock::time_point nextUnresolvedSample;
++    uint64_t retryPasses = 0, noProgressPasses = 0, backoffs = 0;
++    bool retryConfigLoaded = false, retryBackoffEnabled = false;
 +#endif
  
      while (true)
      {
-@@ -7291,6 +7464,12 @@ static void PipelineTaskConsumerThread()
+@@ -7291,9 +7468,26 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
 +#ifdef UNLEASHED_RECOMP_IOS
++        if (!retryConfigLoaded)
++        {
++            // Read after startup and task arrival, never during static initialization.
++            retryBackoffEnabled = std::filesystem::exists(GetUserPath() / "pipeline-retry-backoff.enabled");
++            retryConfigLoaded = true;
++        }
++        bool madeProgress = false;
++        ++retryPasses;
 +        const auto diagnosticNow = std::chrono::steady_clock::now();
 +        const bool sampleUnresolved = diagnosticNow >= nextUnresolvedSample;
 +        uint32_t unresolvedCount = 0;
@@ -561,7 +573,13 @@ index 0205276..76d3c99 100644
  
          for (auto& [type, databaseData] : localPipelineTaskQueue)
          {
-@@ -7358,6 +7537,21 @@ static void PipelineTaskConsumerThread()
++#ifdef UNLEASHED_RECOMP_IOS
++            const auto previousType = type;
++#endif
+             switch (type)
+             {
+             case PipelineTaskType::DatabaseData:
+@@ -7358,6 +7552,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -583,13 +601,25 @@ index 0205276..76d3c99 100644
                  }
  
                  break;
-@@ -7515,6 +7709,17 @@ static void PipelineTaskConsumerThread()
+@@ -7513,11 +7722,40 @@ static void PipelineTaskConsumerThread()
+                 break;
              }
+             }
++#ifdef UNLEASHED_RECOMP_IOS
++            madeProgress |= previousType != type;
++#endif
          }
  
 +#ifdef UNLEASHED_RECOMP_IOS
++        const bool stalled = !allHandled && !madeProgress;
++        noProgressPasses += stalled;
 +        if (sampleUnresolved)
 +        {
++            timespec cpuTime{};
++            const bool cpuValid = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0;
++            LOGFN("IOS-RETRY v1 enabled={} passes={} stalled={} backoffs={} thread_cpu_ms={} cpu_valid={}",
++                retryBackoffEnabled, retryPasses, noProgressPasses, backoffs,
++                double(cpuTime.tv_sec) * 1000.0 + double(cpuTime.tv_nsec) / 1000000.0, cpuValid);
 +            nextUnresolvedSample = diagnosticNow + std::chrono::seconds(5);
 +            std::lock_guard lock(g_loadingDiagnosticMutex);
 +            g_unresolvedPipelineDiagnostic = std::move(unresolvedSummary);
@@ -601,6 +631,17 @@ index 0205276..76d3c99 100644
          if (allHandled)
              localPipelineTaskQueue.clear();
  
++#ifdef UNLEASHED_RECOMP_IOS
++        if (ShouldBackOffPipelineRetry(retryBackoffEnabled, allHandled, madeProgress))
++        {
++            ++backoffs;
++            std::this_thread::sleep_for(std::chrono::milliseconds(1));
++            continue;
++        }
++#endif
+         std::this_thread::yield();
+     }
+ }
 diff --git a/UnleashedRecomp/gpu/video.h b/UnleashedRecomp/gpu/video.h
 index 80a0b21..9fe9378 100644
 --- a/UnleashedRecomp/gpu/video.h
@@ -3052,6 +3093,17 @@ index 0000000..3a66070
 +fi
 +
 +printf '%s\n' "$IPA_PATH"
+diff --git a/UnleashedRecomp/gpu/pipeline_retry_policy.h b/UnleashedRecomp/gpu/pipeline_retry_policy.h
+new file mode 100644
+index 0000000..c670be8
+--- /dev/null
++++ b/UnleashedRecomp/gpu/pipeline_retry_policy.h
+@@ -0,0 +1,5 @@
++#pragma once
++constexpr bool ShouldBackOffPipelineRetry(bool enabled, bool allHandled, bool madeProgress)
++{
++    return enabled && !allHandled && !madeProgress;
++}
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
 index 0000000..bf6aa17

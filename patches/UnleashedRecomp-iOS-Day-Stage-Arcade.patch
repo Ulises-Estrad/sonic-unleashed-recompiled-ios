@@ -1283,7 +1283,7 @@ index 1cf6725..e14f1ff 100644
          pGameModeStageTitle->m_AdvertiseMovieWaitTime = 0;
  }
 diff --git a/UnleashedRecomp/patches/CHudPause_patches.cpp b/UnleashedRecomp/patches/CHudPause_patches.cpp
-index 51990fa..067dcba 100644
+index 51990fa..c3106d1 100644
 --- a/UnleashedRecomp/patches/CHudPause_patches.cpp
 +++ b/UnleashedRecomp/patches/CHudPause_patches.cpp
 @@ -5,6 +5,9 @@
@@ -1396,17 +1396,19 @@ index 51990fa..067dcba 100644
  
      return InjectMenuBehaviour(pThis.u32, count.u32);
  }
-@@ -126,6 +193,9 @@ PPC_FUNC(sub_824B0930)
+@@ -126,6 +193,11 @@ PPC_FUNC(sub_824B0930)
      }
  
      auto pHudPause = (SWA::CHudPause*)g_memory.Translate(ctx.r3.u32);
 +#ifdef UNLEASHED_RECOMP_IOS
-+    IOSPerformance::SetPaused(pHudPause->m_IsShown);
++    // Native Update gates on visibility (824B0960); IsShown is a delayed
++    // presentation/audio latch, not the pause menu's current visibility.
++    IOSPerformance::SetPaused(pHudPause->m_IsVisible);
 +#endif
      auto pInputState = SWA::CInputState::GetInstance();
  
      g_achievementMenuIntroTime += App::s_deltaTime;
-@@ -170,6 +240,7 @@ PPC_FUNC(sub_824B0930)
+@@ -170,6 +242,7 @@ PPC_FUNC(sub_824B0930)
      {
          g_achievementMenuIntroTime = 0;
  
@@ -1414,7 +1416,7 @@ index 51990fa..067dcba 100644
          if (*SWA::SGlobals::ms_IsRenderHud && pHudPause->m_IsShown && !pHudPause->m_Submenu && pHudPause->m_Transition == SWA::eTransitionType_Undefined)
          {
              ButtonGuide::Open(Button("Achievements_Name", FLT_MAX, EButtonIcon::Back, EButtonAlignment::Left, EFontQuality::Low));
-@@ -180,6 +251,7 @@ PPC_FUNC(sub_824B0930)
+@@ -180,6 +253,7 @@ PPC_FUNC(sub_824B0930)
              ButtonGuide::Close();
              g_isClosed = true;
          }

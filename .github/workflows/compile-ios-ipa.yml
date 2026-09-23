@@ -90,15 +90,21 @@ jobs:
           }
           with zipfile.ZipFile(ipa) as archive:
               info = plistlib.loads(archive.read(prefix + "Info.plist"))
-              assert info["CFBundleDisplayName"] == "Sonic Unleashed"
+              assert info["CFBundleDisplayName"] == "Unleashed Perf Lab"
               assert info["CFBundleExecutable"] == "Sonic Unleashed"
-              assert info["CFBundleShortVersionString"] == "1.0.14"
+              assert info["CFBundleShortVersionString"] == "1.0.15"
               assert info["UILaunchScreen"] == {}
               assert info["UIStatusBarHidden"] is True
               assert info["UIViewControllerBasedStatusBarAppearance"] is False
               assert prefix + "Sonic Unleashed" in archive.namelist()
               executable = archive.read(prefix + "Sonic Unleashed")
               markers = (
+                  b"perf-lab-1.0.15",
+                  b"IOS-LAB-CONFIG v1",
+                  b"IOS-EXPERIMENT-FRAME v1",
+                  b"IOS-RETRY-SNAPSHOT v1",
+                  b"IOS-METAL-COUNTERS v1",
+                  b"performance-profile.txt",
                   b"Arcade native: initialized original background sun without time input",
                   b"Arcade gameplay: explicit restart clears live and checkpoint score",
                   b"Arcade gameplay: rank accepted; native completion skips medals and EXP",

@@ -199,10 +199,10 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..efa694d 100644
+index 0205276..27b91f9 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -28,11 +28,20 @@
+@@ -28,11 +28,22 @@
  #include <ui/options_menu.h>
  #include <ui/game_window.h>
  #include <ui/black_bar.h>
@@ -219,11 +219,13 @@ index 0205276..efa694d 100644
 +#include <mach/mach.h>
 +#include <time.h>
 +#include "pipeline_retry_policy.h"
++#include "frame_limiter_policy.h"
++#include "performance_experiments.h"
 +#endif
  
  #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
  #include <magic_enum/magic_enum.hpp>
-@@ -430,6 +439,24 @@ static Mutex g_pipelineCacheMutex;
+@@ -430,6 +441,41 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -243,12 +245,29 @@ index 0205276..efa694d 100644
 +static std::string g_unresolvedPipelineDiagnostic;
 +static uint32_t g_unresolvedPipelineDiagnosticCount;
 +static std::chrono::steady_clock::time_point g_unresolvedPipelineDiagnosticTime;
++struct RetryDiagnosticSnapshot
++{
++    uint64_t passes = 0, stalled = 0, backoffs = 0;
++    double threadCpuMs = 0.0;
++    bool cpuValid = false, valid = false;
++    std::chrono::steady_clock::time_point updated;
++};
++static std::mutex g_retryDiagnosticMutex;
++static RetryDiagnosticSnapshot g_retryDiagnosticSnapshot;
++
++struct LimiterDiagnosticTotals
++{
++    uint64_t sleepNs = 0, yieldNs = 0, waitFrames = 0, overshootNs = 0;
++    uint64_t windowMaxOvershootNs = 0;
++};
++// Present-thread-owned: these counters are not renderer synchronization.
++static LimiterDiagnosticTotals g_limiterDiagnosticTotals;
 +#endif
 +
  enum class PipelineTaskType
  {
      Null,
-@@ -766,6 +793,7 @@ static void DestructTempResources()
+@@ -766,6 +812,7 @@ static void DestructTempResources()
  static std::thread::id g_presentThreadId = std::this_thread::get_id();
  static std::atomic<bool> g_readyForCommands;
  static std::atomic<bool> g_appSuspended = false;
@@ -256,7 +275,7 @@ index 0205276..efa694d 100644
  
  PPC_FUNC_IMPL(__imp__sub_824ECA00);
  PPC_FUNC(sub_824ECA00)
-@@ -1428,6 +1456,7 @@ static void CreateImGuiBackend()
+@@ -1428,6 +1475,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -264,7 +283,7 @@ index 0205276..efa694d 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2613,6 +2642,7 @@ static void DrawFPS()
+@@ -2613,6 +2661,7 @@ static void DrawFPS()
      drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
  }
  
@@ -272,7 +291,7 @@ index 0205276..efa694d 100644
  static void DrawImGui()
  {
      ImGui_ImplSDL2_NewFrame();
-@@ -2668,6 +2698,7 @@ static void DrawImGui()
+@@ -2668,6 +2717,7 @@ static void DrawImGui()
      ImGui::End();
  #endif
  
@@ -280,7 +299,7 @@ index 0205276..efa694d 100644
      AchievementMenu::Draw();
      OptionsMenu::Draw();
      AchievementOverlay::Draw();
-@@ -2676,6 +2707,8 @@ static void DrawImGui()
+@@ -2676,6 +2726,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -289,7 +308,7 @@ index 0205276..efa694d 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -2849,19 +2882,13 @@ static bool g_pendingWaitOnSwapChain = true;
+@@ -2849,19 +2901,13 @@ static bool g_pendingWaitOnSwapChain = true;
  
  void Video::HandleApplicationBackgroundState(bool isBackgrounded)
  {
@@ -316,7 +335,7 @@ index 0205276..efa694d 100644
  }
  
  void Video::WaitOnSwapChain()
-@@ -2882,8 +2909,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2928,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -375,7 +394,7 @@ index 0205276..efa694d 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2905,6 +2982,17 @@ void Video::Present()
+@@ -2905,6 +3001,17 @@ void Video::Present()
      g_executedCommandList.wait(false);
      g_executedCommandList = false;
  
@@ -393,15 +412,44 @@ index 0205276..efa694d 100644
      if (g_swapChainValid)
      {
          if (g_pendingWaitOnSwapChain)
-@@ -2971,6 +3059,46 @@ void Video::Present()
+@@ -2957,10 +3064,29 @@ void Video::Present()
+ 
+         if (now < s_next)
+         {
++#ifdef UNLEASHED_RECOMP_IOS
++            const auto waitStarted = now;
++            const auto remainingNs = std::chrono::duration_cast<std::chrono::nanoseconds>(s_next - now).count();
++            const auto sleepNs = FrameLimiterSleepNanoseconds(IOSPerformance::GetConfig().limiterSleep, remainingNs);
++            if (sleepNs > 0)
++                std::this_thread::sleep_for(std::chrono::nanoseconds(sleepNs));
++            const auto sleepEnded = std::chrono::steady_clock::now();
++#else
+             std::this_thread::sleep_for(std::chrono::floor<std::chrono::milliseconds>(s_next - now - 2ms));
++#endif
+ 
+             while ((now = std::chrono::steady_clock::now()) < s_next)
+                 std::this_thread::yield();
++#ifdef UNLEASHED_RECOMP_IOS
++            const auto actualSleepNs = std::chrono::duration_cast<std::chrono::nanoseconds>(sleepEnded - waitStarted).count();
++            const auto actualYieldNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sleepEnded).count();
++            const auto overshootNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now - s_next).count();
++            g_limiterDiagnosticTotals.sleepNs += sleepNs > 0 ? actualSleepNs : 0;
++            g_limiterDiagnosticTotals.yieldNs += actualYieldNs;
++            ++g_limiterDiagnosticTotals.waitFrames;
++            g_limiterDiagnosticTotals.overshootNs += overshootNs;
++            g_limiterDiagnosticTotals.windowMaxOvershootNs = std::max(g_limiterDiagnosticTotals.windowMaxOvershootNs, uint64_t(overshootNs));
++#endif
+         }
+         else
+         {
+@@ -2971,6 +3097,119 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
 +#ifdef UNLEASHED_RECOMP_IOS
-+    // Opt-in diagnostics only: never alter pacing, rendering or gameplay.
++    // Always collected in this experiment pack so every profile has identical
++    // instrumentation. These measurements never alter rendering or gameplay.
 +    // Atomic profiler samples are observational and may refer to adjacent frames.
-+    static const bool performanceLogging = std::filesystem::exists(GetUserPath() / "performance-diagnostics.enabled");
-+    if (performanceLogging)
 +    {
 +        static auto reportStart = std::chrono::steady_clock::now();
 +        static uint64_t samples = 0;
@@ -435,12 +483,86 @@ index 0205276..efa694d 100644
 +            reportStart = now;
 +        }
 +    }
++    {
++        static auto reportStart = std::chrono::steady_clock::now();
++        static auto previousPresent = reportStart;
++        static bool havePreviousPresent = false;
++        static FrameIntervalHistogram intervals;
++        static double gpuTimestampSum = 0.0;
++        static uint64_t epochStart = IOSPerformance::GetStageEpoch();
++        static bool loadingSeen = false;
++        static bool pausedSeen = false;
++        const auto now = std::chrono::steady_clock::now();
++        loadingSeen |= IOSPerformance::IsLoading();
++        pausedSeen |= IOSPerformance::IsPaused();
++        if (havePreviousPresent)
++        {
++            intervals.Add(std::chrono::duration_cast<std::chrono::nanoseconds>(now - previousPresent).count());
++            // This is the latest asynchronous GPU timestamp sample, not a
++            // GPU/CPU interval pairing and not a GPU utilization percentage.
++            gpuTimestampSum += g_gpuFrameProfiler.value.load();
++        }
++        previousPresent = now;
++        havePreviousPresent = true;
++        const double elapsed = std::chrono::duration<double>(now - reportStart).count();
++        if (elapsed >= 5.0 && intervals.count != 0)
++        {
++            const uint64_t epochEnd = IOSPerformance::GetStageEpoch();
++            timespec processCpu{}, presentThreadCpu{};
++            const bool processCpuValid = clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &processCpu) == 0;
++            const bool presentThreadCpuValid = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &presentThreadCpu) == 0;
++            const auto sendObject = reinterpret_cast<id (*)(id, SEL)>(objc_msgSend);
++            const auto sendInteger = reinterpret_cast<long (*)(id, SEL)>(objc_msgSend);
++            const id processInfo = sendObject(reinterpret_cast<id>(objc_getClass("NSProcessInfo")), sel_registerName("processInfo"));
++            const long thermal = sendInteger(processInfo, sel_registerName("thermalState"));
++            task_vm_info_data_t vm{};
++            mach_msg_type_number_t vmCount = TASK_VM_INFO_COUNT;
++            const bool memoryValid = task_info(mach_task_self(), TASK_VM_INFO,
++                reinterpret_cast<task_info_t>(&vm), &vmCount) == KERN_SUCCESS;
++            IOSPerformance::Record(fmt::format(
++                "IOS-EXPERIMENT-FRAME v1 frames={} elapsed_s={} frame_mean_ms={} frame_p50_ms={} frame_p95_ms={} frame_p99_ms={} frame_max_ms={} over33ms={} over50ms={} over1000ms={} percentile_bucket_ms=0.5 limiter_sleep_ms={} limiter_yield_ms={} limiter_wait_frames={} limiter_overshoot_ms={} limiter_max_overshoot_ms={} process_cpu_ms={} process_cpu_valid={} present_thread_cpu_ms={} present_thread_cpu_valid={} gpu_timestamp_ms={} gpu_timestamp_async=true thermal={} footprint_bytes={} memory_valid={} resolution={} fps_limit={} aa={} transparency_aa={} shadow_resolution={} gi_filter={} motion_blur={} epoch_start={} epoch_end={} mixed_stage={} loading_seen={} paused_seen={}",
++                intervals.count, elapsed, double(intervals.sumNs) / double(intervals.count) / 1000000.0,
++                intervals.PercentileMs(50), intervals.PercentileMs(95), intervals.PercentileMs(99), double(intervals.maxNs) / 1000000.0,
++                intervals.over33ms, intervals.over50ms, intervals.over1000ms,
++                double(g_limiterDiagnosticTotals.sleepNs) / 1000000.0,
++                double(g_limiterDiagnosticTotals.yieldNs) / 1000000.0, g_limiterDiagnosticTotals.waitFrames,
++                double(g_limiterDiagnosticTotals.overshootNs) / 1000000.0,
++                double(g_limiterDiagnosticTotals.windowMaxOvershootNs) / 1000000.0,
++                double(processCpu.tv_sec) * 1000.0 + double(processCpu.tv_nsec) / 1000000.0, processCpuValid,
++                double(presentThreadCpu.tv_sec) * 1000.0 + double(presentThreadCpu.tv_nsec) / 1000000.0, presentThreadCpuValid,
++                gpuTimestampSum / double(intervals.count), thermal, memoryValid ? vm.phys_footprint : 0, memoryValid,
++                static_cast<float>(Config::ResolutionScale), static_cast<int>(Config::FPS),
++                static_cast<int>(Config::AntiAliasing.Value), static_cast<bool>(Config::TransparencyAntiAliasing),
++                static_cast<int>(Config::ShadowResolution.Value), static_cast<int>(Config::GITextureFiltering.Value),
++                static_cast<int>(Config::MotionBlur.Value), epochStart, epochEnd, epochStart != epochEnd, loadingSeen, pausedSeen));
++
++            RetryDiagnosticSnapshot retry;
++            {
++                std::lock_guard lock(g_retryDiagnosticMutex);
++                retry = g_retryDiagnosticSnapshot;
++            }
++            IOSPerformance::Record(fmt::format(
++                "IOS-RETRY-SNAPSHOT v1 enabled={} passes={} stalled={} backoffs={} thread_cpu_ms={} cpu_valid={} snapshot_valid={} pending={} sample_age_ms={}",
++                IOSPerformance::GetConfig().retryBackoff, retry.passes, retry.stalled, retry.backoffs,
++                retry.threadCpuMs, retry.cpuValid, retry.valid,
++                g_pendingPipelineTaskCount.load(std::memory_order_relaxed),
++                retry.valid ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - retry.updated).count() : -1.0));
++            IOSPerformance::ReportBackendCounters();
++            intervals = {};
++            gpuTimestampSum = 0.0;
++            g_limiterDiagnosticTotals.windowMaxOvershootNs = 0;
++            reportStart = now;
++            epochStart = epochEnd;
++            loadingSeen = false;
++            pausedSeen = false;
++        }
++    }
 +    g_diagnosticPresentCompleted.fetch_add(1, std::memory_order_relaxed);
 +#endif
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3220,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3331,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -450,7 +572,7 @@ index 0205276..efa694d 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -6398,6 +6529,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6398,6 +6640,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
  #endif
  )
  {
@@ -461,7 +583,7 @@ index 0205276..efa694d 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6544,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6409,6 +6655,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      cmd.addPipeline.hash = pipelineHash;
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
@@ -472,7 +594,7 @@ index 0205276..efa694d 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6653,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6514,6 +6764,9 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.token = tokenPair.sharedToken;
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
@@ -482,7 +604,7 @@ index 0205276..efa694d 100644
  #endif
              g_pipelineStateQueue.enqueue(queueItem);
          }
-@@ -7086,27 +7228,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7339,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -540,7 +662,7 @@ index 0205276..efa694d 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7445,11 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7556,11 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -552,7 +674,7 @@ index 0205276..efa694d 100644
  
      while (true)
      {
-@@ -7291,9 +7468,26 @@ static void PipelineTaskConsumerThread()
+@@ -7291,9 +7579,26 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -560,7 +682,7 @@ index 0205276..efa694d 100644
 +        if (!retryConfigLoaded)
 +        {
 +            // Read after startup and task arrival, never during static initialization.
-+            retryBackoffEnabled = std::filesystem::exists(GetUserPath() / "pipeline-retry-backoff.enabled");
++            retryBackoffEnabled = IOSPerformance::GetConfig().retryBackoff;
 +            retryConfigLoaded = true;
 +        }
 +        bool madeProgress = false;
@@ -579,7 +701,7 @@ index 0205276..efa694d 100644
              switch (type)
              {
              case PipelineTaskType::DatabaseData:
-@@ -7358,6 +7552,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7663,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -601,7 +723,7 @@ index 0205276..efa694d 100644
                  }
  
                  break;
-@@ -7513,11 +7722,40 @@ static void PipelineTaskConsumerThread()
+@@ -7513,11 +7833,54 @@ static void PipelineTaskConsumerThread()
                  break;
              }
              }
@@ -613,13 +735,27 @@ index 0205276..efa694d 100644
 +#ifdef UNLEASHED_RECOMP_IOS
 +        const bool stalled = !allHandled && !madeProgress;
 +        noProgressPasses += stalled;
-+        if (sampleUnresolved)
++        // Publish final totals when the queue drains as well as while polling.
++        // Present can then report a stable snapshot even while this worker is
++        // correctly sleeping in atomic::wait with no tasks (not a missing log).
++        if (sampleUnresolved || allHandled)
 +        {
 +            timespec cpuTime{};
 +            const bool cpuValid = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0;
-+            LOGFN("IOS-RETRY v1 enabled={} passes={} stalled={} backoffs={} thread_cpu_ms={} cpu_valid={}",
-+                retryBackoffEnabled, retryPasses, noProgressPasses, backoffs,
-+                double(cpuTime.tv_sec) * 1000.0 + double(cpuTime.tv_nsec) / 1000000.0, cpuValid);
++            const double cpuMs = double(cpuTime.tv_sec) * 1000.0 + double(cpuTime.tv_nsec) / 1000000.0;
++            {
++                std::lock_guard lock(g_retryDiagnosticMutex);
++                g_retryDiagnosticSnapshot = { retryPasses, noProgressPasses, backoffs, cpuMs, cpuValid, true,
++                    std::chrono::steady_clock::now() };
++            }
++            if (sampleUnresolved)
++            {
++                LOGFN("IOS-RETRY v1 enabled={} passes={} stalled={} backoffs={} thread_cpu_ms={} cpu_valid={}",
++                    retryBackoffEnabled, retryPasses, noProgressPasses, backoffs, cpuMs, cpuValid);
++            }
++        }
++        if (sampleUnresolved)
++        {
 +            nextUnresolvedSample = diagnosticNow + std::chrono::seconds(5);
 +            std::lock_guard lock(g_loadingDiagnosticMutex);
 +            g_unresolvedPipelineDiagnostic = std::move(unresolvedSummary);
@@ -874,13 +1010,27 @@ index a765d12..b1713ce 100644
      fileHandle->stream = std::move(fileStream);
      fileHandle->path = std::move(filePath);
 diff --git a/UnleashedRecomp/main.cpp b/UnleashedRecomp/main.cpp
-index e34d7e1..75e625e 100644
+index e34d7e1..dc41d5f 100644
 --- a/UnleashedRecomp/main.cpp
 +++ b/UnleashedRecomp/main.cpp
-@@ -213,6 +213,20 @@ int main(int argc, char *argv[])
+@@ -30,6 +30,9 @@
+ #include <ui/installer_wizard.h>
+ #include <mod/mod_loader.h>
+ #include <preload_executable.h>
++#ifdef UNLEASHED_RECOMP_IOS
++#include <gpu/performance_experiments.h>
++#endif
+ 
+ #ifdef _WIN32
+ #include <timeapi.h>
+@@ -213,6 +216,24 @@ int main(int argc, char *argv[])
  
      os::logger::Init();
  
++#ifdef UNLEASHED_RECOMP_IOS
++    IOSPerformance::Initialize();
++#endif
++
 +#ifdef UNLEASHED_RECOMP_IOS
 +    LOGN("iOS startup: native fullscreen, threaded guest, condition-variable waits.");
 +    LOGFN("iOS startup: game data root={}", GetGamePath().string());
@@ -898,7 +1048,7 @@ index e34d7e1..75e625e 100644
  #if TARGET_OS_IOS
      if (!apple::SupportsBCTextures()) {
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_iOS_UnsupportedGPU_BCTextures").c_str(), GameWindow::s_pWindow);
-@@ -354,6 +368,9 @@ int main(int argc, char *argv[])
+@@ -354,6 +375,9 @@ int main(int argc, char *argv[])
  
      std::filesystem::path modulePath;
      bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
@@ -908,7 +1058,7 @@ index e34d7e1..75e625e 100644
      bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
      if (runInstallerWizard)
      {
-@@ -370,13 +387,22 @@ int main(int argc, char *argv[])
+@@ -370,13 +394,22 @@ int main(int argc, char *argv[])
      }
  
      ModLoader::Init();
@@ -931,7 +1081,7 @@ index e34d7e1..75e625e 100644
  
      if (!runInstallerWizard)
      {
-@@ -387,9 +413,31 @@ int main(int argc, char *argv[])
+@@ -387,9 +420,31 @@ int main(int argc, char *argv[])
          }
      }
  
@@ -1133,10 +1283,20 @@ index 1cf6725..e14f1ff 100644
          pGameModeStageTitle->m_AdvertiseMovieWaitTime = 0;
  }
 diff --git a/UnleashedRecomp/patches/CHudPause_patches.cpp b/UnleashedRecomp/patches/CHudPause_patches.cpp
-index 51990fa..3485e7b 100644
+index 51990fa..067dcba 100644
 --- a/UnleashedRecomp/patches/CHudPause_patches.cpp
 +++ b/UnleashedRecomp/patches/CHudPause_patches.cpp
-@@ -14,9 +14,50 @@ float g_achievementMenuOutroTime = 0.0f;
+@@ -5,6 +5,9 @@
+ #include <ui/options_menu.h>
+ #include <locale/locale.h>
+ #include <app.h>
++#ifdef UNLEASHED_RECOMP_IOS
++#include <gpu/performance_experiments.h>
++#endif
+ 
+ bool g_isClosed;
+ 
+@@ -14,9 +17,50 @@ float g_achievementMenuOutroTime = 0.0f;
  constexpr float g_achievementMenuOutroThreshold = 0.32f;
  bool g_isAchievementMenuOutro = false;
  
@@ -1187,7 +1347,7 @@ index 51990fa..3485e7b 100644
      guest_stack_var<Hedgehog::Base::CSharedString> name("option");
  
      GuestToHostFunction<int>(sub_824AE690, pThis.u32, menu.get(), name.get());
-@@ -49,6 +90,7 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+@@ -49,6 +93,7 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
              break;
      }
  
@@ -1195,7 +1355,7 @@ index 51990fa..3485e7b 100644
      if (auto pInputState = SWA::CInputState::GetInstance())
      {
          if (pInputState->GetPadState().IsTapped(SWA::eKeyState_Select))
-@@ -62,9 +104,25 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+@@ -62,9 +107,25 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
          }
      }
  
@@ -1222,7 +1382,7 @@ index 51990fa..3485e7b 100644
          {
              OptionsMenu::Open(true, pHudPause->m_Menu);
  
-@@ -90,7 +148,13 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
+@@ -90,7 +151,13 @@ bool InjectMenuBehaviour(uint32_t pThis, uint32_t count)
  
  bool CHudPauseItemCountMidAsmHook(PPCRegister& pThis, PPCRegister& count)
  {
@@ -1236,7 +1396,17 @@ index 51990fa..3485e7b 100644
  
      return InjectMenuBehaviour(pThis.u32, count.u32);
  }
-@@ -170,6 +234,7 @@ PPC_FUNC(sub_824B0930)
+@@ -126,6 +193,9 @@ PPC_FUNC(sub_824B0930)
+     }
+ 
+     auto pHudPause = (SWA::CHudPause*)g_memory.Translate(ctx.r3.u32);
++#ifdef UNLEASHED_RECOMP_IOS
++    IOSPerformance::SetPaused(pHudPause->m_IsShown);
++#endif
+     auto pInputState = SWA::CInputState::GetInstance();
+ 
+     g_achievementMenuIntroTime += App::s_deltaTime;
+@@ -170,6 +240,7 @@ PPC_FUNC(sub_824B0930)
      {
          g_achievementMenuIntroTime = 0;
  
@@ -1244,7 +1414,7 @@ index 51990fa..3485e7b 100644
          if (*SWA::SGlobals::ms_IsRenderHud && pHudPause->m_IsShown && !pHudPause->m_Submenu && pHudPause->m_Transition == SWA::eTransitionType_Undefined)
          {
              ButtonGuide::Open(Button("Achievements_Name", FLT_MAX, EButtonIcon::Back, EButtonAlignment::Left, EFontQuality::Low));
-@@ -180,6 +245,7 @@ PPC_FUNC(sub_824B0930)
+@@ -180,6 +251,7 @@ PPC_FUNC(sub_824B0930)
              ButtonGuide::Close();
              g_isClosed = true;
          }
@@ -1732,6 +1902,49 @@ index cce0a58..b0ff344 100644
  }
  
  // Dark Gaia energy change hook.
+diff --git a/UnleashedRecomp/patches/resident_patches.cpp b/UnleashedRecomp/patches/resident_patches.cpp
+index 2741d0e..fba7d33 100644
+--- a/UnleashedRecomp/patches/resident_patches.cpp
++++ b/UnleashedRecomp/patches/resident_patches.cpp
+@@ -5,6 +5,9 @@
+ #include <user/persistent_storage_manager.h>
+ #include <user/config.h>
+ #include <app.h>
++#ifdef UNLEASHED_RECOMP_IOS
++#include <gpu/performance_experiments.h>
++#endif
+ 
+ // SWA::Message::MsgRequestStartLoading::Impl
+ PPC_FUNC_IMPL(__imp__sub_824DCF38);
+@@ -13,6 +16,9 @@ PPC_FUNC(sub_824DCF38)
+     auto pLoading = (SWA::CLoading*)g_memory.Translate(ctx.r3.u32);
+ 
+     App::s_isLoading = true;
++#ifdef UNLEASHED_RECOMP_IOS
++    IOSPerformance::SetLoading(true);
++#endif
+ 
+     if (ctx.r4.u32 == SWA::eLoadingDisplayType_WerehogMovie)
+     {
+@@ -74,7 +80,18 @@ PPC_FUNC(sub_824DAB60)
+     __imp__sub_824DAB60(ctx, base);
+ 
+     if (!pLoading->m_LoadingDisplayType)
++    {
++#ifdef UNLEASHED_RECOMP_IOS
++        if (IOSPerformance::IsLoading())
++        {
++            const auto document = SWA::CGameDocument::GetInstance();
++            IOSPerformance::ObserveStage(document && document->m_pMember
++                ? document->m_pMember->m_StageName.c_str() : nullptr);
++            IOSPerformance::SetLoading(false);
++        }
++#endif
+         App::s_isLoading = false;
++    }
+ }
+ 
+ // Load voice language files.
 diff --git a/UnleashedRecomp/platform/ios/nfd_stub.cpp b/UnleashedRecomp/platform/ios/nfd_stub.cpp
 new file mode 100644
 index 0000000..736b084
@@ -1817,7 +2030,7 @@ index 0000000..736b084
 +}
 +}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-index 817db38..c890dc5 100644
+index 817db38..4bfd0d1 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 +++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 @@ -6,28 +6,73 @@
@@ -1855,7 +2068,7 @@ index 817db38..c890dc5 100644
 -        <string>Unleashed Recompiled</string>
 -        <key>CFBundleIconName</key>
 -        <string>AppIcon</string>
-+        <string>Sonic Unleashed</string>
++        <string>Unleashed Perf Lab</string>
 +        <key>CFBundleIconFiles</key>
 +        <array>
 +            <string>Icon-20</string>
@@ -1914,7 +2127,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..03def65 100644
+index d9130f4..ef92797 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -1922,9 +2135,9 @@ index d9130f4..03def65 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=14
++VERSION_REVISION=15
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
-index 5f1259a..87a4553 100644
+index 5f1259a..2884035 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
 +++ b/UnleashedRecomp/ui/game_window.cpp
 @@ -1,4 +1,5 @@
@@ -1933,7 +2146,17 @@ index 5f1259a..87a4553 100644
  #include <gpu/video.h>
  #include <os/logger.h>
  #include <os/user.h>
-@@ -20,7 +21,7 @@ bool m_isResizing = false;
+@@ -6,6 +7,9 @@
+ #include <app.h>
+ #include <sdl_listener.h>
+ #include <SDL_syswm.h>
++#ifdef UNLEASHED_RECOMP_IOS
++#include <gpu/performance_experiments.h>
++#endif
+ 
+ #if _WIN32
+ #include <dwmapi.h>
+@@ -20,7 +24,7 @@ bool m_isResizing = false;
  
  int Window_OnSDLEvent(void*, SDL_Event* event)
  {
@@ -1942,7 +2165,25 @@ index 5f1259a..87a4553 100644
          ImGui_ImplSDL2_ProcessEvent(event);
  
      for (auto listener : GetEventListeners())
-@@ -172,6 +173,10 @@ void GameWindow::Init(const char* sdlVideoDriver)
+@@ -35,11 +39,17 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
+     {
+         case SDL_APP_WILLENTERBACKGROUND:
+         {
++#ifdef UNLEASHED_RECOMP_IOS
++            IOSPerformance::SetSuspended(true);
++#endif
+             Video::HandleApplicationBackgroundState(true);
+             break;
+         }
+ 
+         case SDL_APP_DIDENTERFOREGROUND: {
++#ifdef UNLEASHED_RECOMP_IOS
++            IOSPerformance::SetSuspended(false);
++#endif
+             Video::HandleApplicationBackgroundState(false);
+             break;
+         }
+@@ -172,6 +182,10 @@ void GameWindow::Init(const char* sdlVideoDriver)
      SDL_SetHint("SDL_APP_ID", "io.github.hedge_dev.unleashedrecomp");
  #endif
  
@@ -1953,7 +2194,7 @@ index 5f1259a..87a4553 100644
      if (SDL_VideoInit(sdlVideoDriver) != 0 && sdlVideoDriver)
      {
          LOGFN_ERROR("Failed to initialise the SDL video driver: \"{}\". Falling back to default.", sdlVideoDriver);
-@@ -345,6 +350,12 @@ bool GameWindow::IsFullscreen()
+@@ -345,6 +359,12 @@ bool GameWindow::IsFullscreen()
  
  bool GameWindow::SetFullscreen(bool isEnabled)
  {
@@ -1966,7 +2207,7 @@ index 5f1259a..87a4553 100644
      if (isEnabled)
      {
          SDL_SetWindowFullscreen(s_pWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
-@@ -446,8 +457,12 @@ uint32_t GameWindow::GetWindowFlags()
+@@ -446,8 +466,12 @@ uint32_t GameWindow::GetWindowFlags()
      if (Config::WindowState == EWindowState::Maximised)
          flags |= SDL_WINDOW_MAXIMIZED;
  
@@ -3104,6 +3345,348 @@ index 0000000..c670be8
 +{
 +    return enabled && !allHandled && !madeProgress;
 +}
+diff --git a/UnleashedRecomp/gpu/frame_limiter_policy.h b/UnleashedRecomp/gpu/frame_limiter_policy.h
+new file mode 100644
+index 0000000..0b3c207
+--- /dev/null
++++ b/UnleashedRecomp/gpu/frame_limiter_policy.h
+@@ -0,0 +1,56 @@
++#pragma once
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++
++// Keep the same deadline and frame interval. Only the amount of time spent
++// sleeping versus yielding changes. Baseline mirrors the old whole-ms sleep.
++constexpr int64_t FrameLimiterSleepNanoseconds(bool finerSleep, int64_t remainingNs)
++{
++    const int64_t guardNs = finerSleep ? 500000 : 2000000;
++    if (remainingNs <= guardNs)
++        return 0;
++    const int64_t sleepNs = remainingNs - guardNs;
++    return finerSleep ? sleepNs : sleepNs / 1000000 * 1000000;
++}
++
++// Bounded, allocation-free per-frame collection. Percentiles are upper bounds
++// of 0.5-ms buckets; values over 1000 ms use the measured maximum instead.
++struct FrameIntervalHistogram
++{
++    std::array<uint64_t, 2002> buckets{};
++    uint64_t count = 0;
++    uint64_t over33ms = 0, over50ms = 0, over1000ms = 0;
++    int64_t sumNs = 0, maxNs = 0;
++
++    void Add(int64_t elapsedNs)
++    {
++        if (elapsedNs < 0)
++            return;
++        const uint64_t bucket = static_cast<uint64_t>(elapsedNs / 500000 + (elapsedNs % 500000 != 0));
++        ++buckets[bucket < buckets.size() ? bucket : buckets.size() - 1];
++        ++count;
++        sumNs += elapsedNs;
++        if (elapsedNs > maxNs)
++            maxNs = elapsedNs;
++        over33ms += elapsedNs > 33333333;
++        over50ms += elapsedNs > 50000000;
++        over1000ms += elapsedNs > 1000000000;
++    }
++
++    double PercentileMs(unsigned percent) const
++    {
++        if (count == 0)
++            return 0.0;
++        const uint64_t rank = (count * percent + 99) / 100;
++        uint64_t cumulative = 0;
++        for (size_t i = 0; i < buckets.size(); ++i)
++        {
++            cumulative += buckets[i];
++            if (cumulative >= rank)
++                return i == buckets.size() - 1 ? double(maxNs) / 1000000.0 : double(i) * 0.5;
++        }
++        return double(maxNs) / 1000000.0;
++    }
++};
+diff --git a/UnleashedRecomp/gpu/performance_profile.h b/UnleashedRecomp/gpu/performance_profile.h
+new file mode 100644
+index 0000000..33bc0bd
+--- /dev/null
++++ b/UnleashedRecomp/gpu/performance_profile.h
+@@ -0,0 +1,28 @@
++#pragma once
++#include <string_view>
++
++namespace IOSPerformance
++{
++struct ProfileSelection
++{
++    bool valid;
++    bool retryBackoff;
++    bool clearStateCache;
++    bool limiterSleep;
++};
++
++// Exact named profiles make ablation comparisons reproducible. Unknown input
++// must never silently enable experimental behavior.
++constexpr ProfileSelection ParseProfile(std::string_view name)
++{
++    if (name == "baseline") return {true, false, false, false};
++    if (name == "retry") return {true, true, false, false};
++    if (name == "clear-cache") return {true, false, true, false};
++    if (name == "limiter") return {true, false, false, true};
++    if (name == "all") return {true, true, true, true};
++    if (name == "all-no-retry") return {true, false, true, true};
++    if (name == "all-no-clear-cache") return {true, true, false, true};
++    if (name == "all-no-limiter") return {true, true, true, false};
++    return {false, false, false, false};
++}
++}
+diff --git a/UnleashedRecomp/gpu/performance_experiments.h b/UnleashedRecomp/gpu/performance_experiments.h
+new file mode 100644
+index 0000000..5b31729
+--- /dev/null
++++ b/UnleashedRecomp/gpu/performance_experiments.h
+@@ -0,0 +1,191 @@
++#pragma once
++#ifdef UNLEASHED_RECOMP_IOS
++#include "performance_profile.h"
++#include <plume_performance.h>
++#include <os/logger.h>
++#include <user/paths.h>
++#include <CoreFoundation/CoreFoundation.h>
++#include <atomic>
++#include <chrono>
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <mutex>
++#include <string>
++
++namespace IOSPerformance
++{
++inline constexpr const char* Build = "perf-lab-1.0.15";
++struct Config
++{
++    bool retryBackoff = false;
++    bool clearStateCache = false;
++    bool limiterSleep = false;
++    std::string profile = "baseline";
++    bool valid = true;
++    bool defaulted = false;
++};
++
++inline const Config& GetConfig()
++{
++    // Read once, before creating renderer/worker threads. Relaunch to switch;
++    // changing a Metal resource's ownership policy mid-command is not safe.
++    static const Config config = [] {
++        Config c;
++        const auto path = GetUserPath() / "performance-profile.txt";
++        std::error_code ec;
++        const bool exists = std::filesystem::exists(path, ec);
++        std::string name;
++        if (!exists && !ec)
++        {
++            name = "all";
++            c.defaulted = true;
++        }
++        else
++        {
++            std::ifstream input(path);
++            char contents[65]{};
++            input.read(contents, 64);
++            name.assign(contents, static_cast<size_t>(input.gcount()));
++            if (input.bad() || !input.eof() || ec)
++                name.clear(); // Unreadable/oversized input fails closed.
++            const auto first = name.find_first_not_of(" \t\r\n");
++            const auto last = name.find_last_not_of(" \t\r\n");
++            name = first == std::string::npos ? "" : name.substr(first, last - first + 1);
++        }
++        const auto choice = ParseProfile(name);
++        c.valid = choice.valid;
++        c.profile = choice.valid ? name : "baseline";
++        c.retryBackoff = choice.retryBackoff;
++        c.clearStateCache = choice.clearStateCache;
++        c.limiterSleep = choice.limiterSleep;
++        return c;
++    }();
++    return config;
++}
++
++inline std::mutex recordMutex;
++inline FILE* recordFile = nullptr;
++inline size_t recordBytes = 0;
++inline constexpr size_t RecordLimit = 8 * 1024 * 1024;
++inline std::string session = "uninitialized";
++inline std::string stage = "unknown";
++inline std::atomic<bool> loading{true}, paused{false}, suspended{false};
++inline std::atomic<uint64_t> stageEpoch{0};
++inline bool IsLoading() { return loading.load(std::memory_order_acquire); }
++inline bool IsPaused() { return paused.load(std::memory_order_acquire); }
++inline bool IsSuspended() { return suspended.load(std::memory_order_acquire); }
++inline uint64_t GetStageEpoch() { return stageEpoch.load(std::memory_order_acquire); }
++
++inline std::string SafeToken(std::string text)
++{
++    if (text.empty()) return "unknown";
++    if (text.size() > 128) text.resize(128);
++    for (char& c : text)
++        if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') &&
++            !(c >= '0' && c <= '9') && c != '-' && c != '_' && c != '.') c = '_';
++    return text;
++}
++
++inline void Record(const std::string& message)
++{
++    std::string line;
++    {
++        std::lock_guard lock(recordMutex);
++        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
++        line = fmt::format("IOS-LAB v1 build={} session={} profile={} monotonic_ms={} stage={} paused={} loading={} suspended={} {}",
++            Build, session, GetConfig().profile, now, stage, IsPaused(), IsLoading(), IsSuspended(), message);
++        if (recordFile && recordBytes + line.size() + 1 <= RecordLimit)
++        {
++            const auto bytes = std::fwrite(line.data(), 1, line.size(), recordFile);
++            std::fputc('\n', recordFile);
++            recordBytes += bytes + 1;
++            std::fflush(recordFile); // Survives app termination; only periodic samples/transitions.
++        }
++    }
++    LOGFN("{}", line);
++}
++
++inline void SetPaused(bool value)
++{
++    if (paused.exchange(value, std::memory_order_acq_rel) != value)
++    {
++        stageEpoch.fetch_add(1, std::memory_order_acq_rel);
++        Record("IOS-LAB-PHASE v1 event=pause");
++    }
++}
++inline void SetLoading(bool value)
++{
++    if (loading.exchange(value, std::memory_order_acq_rel) != value)
++    {
++        stageEpoch.fetch_add(1, std::memory_order_acq_rel);
++        if (value) SetPaused(false);
++        Record("IOS-LAB-PHASE v1 event=loading");
++    }
++}
++inline void SetSuspended(bool value)
++{
++    if (suspended.exchange(value, std::memory_order_acq_rel) != value)
++    {
++        stageEpoch.fetch_add(1, std::memory_order_acq_rel);
++        Record("IOS-LAB-PHASE v1 event=suspended");
++    }
++}
++inline void ObserveStage(const char* name)
++{
++    const std::string next = SafeToken(name ? name : "unknown");
++    {
++        std::lock_guard lock(recordMutex);
++        if (next == stage) return;
++        stage = next;
++        stageEpoch.fetch_add(1, std::memory_order_acq_rel);
++    }
++    SetPaused(false);
++    Record("IOS-LAB-PHASE v1 event=stage");
++}
++
++inline std::string BundleString(CFStringRef key)
++{
++    const auto value = CFBundleGetValueForInfoDictionaryKey(CFBundleGetMainBundle(), key);
++    char result[256]{};
++    return value && CFGetTypeID(value) == CFStringGetTypeID() &&
++        CFStringGetCString(static_cast<CFStringRef>(value), result, sizeof(result), kCFStringEncodingUTF8)
++        ? SafeToken(result) : "unknown";
++}
++
++inline void Initialize()
++{
++    static std::once_flag once;
++    std::call_once(once, [] {
++        const auto& config = GetConfig();
++        plume::performance::enabled = true;
++        plume::performance::cacheClearState = config.clearStateCache;
++        session = std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(
++            std::chrono::system_clock::now().time_since_epoch()).count());
++        std::error_code ec;
++        const auto directory = GetUserPath() / "PerformanceLab";
++        std::filesystem::create_directories(directory, ec);
++        if (!ec)
++            recordFile = std::fopen((directory / ("session-" + session + ".log")).c_str(), "wx");
++        Record(fmt::format("IOS-LAB-CONFIG v1 retry={} clear_cache={} limiter={} valid={} defaulted={} persistent={} bundle_version={} source={} legacy_retry_marker_ignored=true",
++            config.retryBackoff, config.clearStateCache, config.limiterSleep, config.valid,
++            config.defaulted, recordFile != nullptr, BundleString(CFSTR("CFBundleVersion")),
++            BundleString(CFSTR("PerformanceLabSourceSHA"))));
++    });
++}
++
++inline void ReportBackendCounters()
++{
++    using namespace plume::performance;
++    const auto read = [](const std::atomic<uint64_t>& counter) { return counter.load(std::memory_order_relaxed); };
++    Record(fmt::format("IOS-METAL-COUNTERS v1 partial_color={} partial_color_depth={} cache_uses={} state_created={} state_released={} full_color={} partial_depth={} full_depth={} command_commits={} acquire_commits={} present_commits={} wait_commits={} render_encoders={} residency_adds={} residency_removes={} residency_commits={} create_samples={} create_sample_ns={}",
++        read(partialColorClears), read(partialColorClearsWithDepth), read(cachedClearStateUses),
++        read(clearDepthStateCreations), read(clearDepthStateReleases), read(fullColorClears),
++        read(partialDepthStencilClears), read(fullDepthStencilClears), read(commandBufferCommits),
++        read(acquireCommandBufferCommits), read(presentCommandBufferCommits), read(queueWaitCommandBufferCommits),
++        read(renderEncoderStarts), read(residencyAdds), read(residencyRemoves), read(residencyCommits),
++        read(clearDepthStateCreateSamples), read(clearDepthStateCreateNanoseconds)));
++}
++}
++#endif
+diff --git a/thirdparty/plume/plume_performance.h b/thirdparty/plume/plume_performance.h
+new file mode 100644
+index 0000000..b7847f2
+--- /dev/null
++++ b/thirdparty/plume/plume_performance.h
+@@ -0,0 +1,43 @@
++// Diagnostic-only counters shared by the Metal backend and its host.
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++
++namespace plume::performance {
++    // The host sets these once, before device creation or renderer threads start.
++    // Do not mutate them while a device is alive.
++    inline bool enabled = false;
++    inline bool cacheClearState = false;
++
++    // Cumulative process-local counts. Read with relaxed ordering and compare
++    // deltas within one process; snapshots are not atomic across all fields.
++    inline std::atomic<uint64_t> fullColorClears{0};
++    inline std::atomic<uint64_t> partialColorClears{0};
++    inline std::atomic<uint64_t> partialColorClearsWithDepth{0};
++    inline std::atomic<uint64_t> fullDepthStencilClears{0};
++    inline std::atomic<uint64_t> partialDepthStencilClears{0};
++    inline std::atomic<uint64_t> cachedClearStateUses{0};
++    // These creation/release counters cover the color-clear no-write state only,
++    // not all pipeline depth/stencil states in the renderer.
++    inline std::atomic<uint64_t> clearDepthStateCreations{0};
++    inline std::atomic<uint64_t> clearDepthStateReleases{0};
++    // Creation wall-time sampled at indices 0,64,128,...; not exclusive CPU time.
++    inline std::atomic<uint64_t> clearDepthStateCreateSamples{0};
++    inline std::atomic<uint64_t> clearDepthStateCreateNanoseconds{0};
++    // Total includes acquire, present, queue wait, and ordinary command lists.
++    inline std::atomic<uint64_t> commandBufferCommits{0};
++    inline std::atomic<uint64_t> acquireCommandBufferCommits{0};
++    inline std::atomic<uint64_t> presentCommandBufferCommits{0};
++    inline std::atomic<uint64_t> queueWaitCommandBufferCommits{0};
++    inline std::atomic<uint64_t> renderEncoderStarts{0};
++    inline std::atomic<uint64_t> residencyAdds{0};
++    inline std::atomic<uint64_t> residencyRemoves{0};
++    inline std::atomic<uint64_t> residencyCommits{0};
++
++    inline void count(std::atomic<uint64_t>& counter, uint64_t amount = 1) {
++        if (enabled) {
++            counter.fetch_add(amount, std::memory_order_relaxed);
++        }
++    }
++}
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
 new file mode 100644
 index 0000000..bf6aa17
@@ -3848,10 +4431,56 @@ index 59e2d07..b9dfd5e 100644
 +    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
  }
 diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
-index 2abe67c..e152038 100644
+index 2abe67c..1478240 100644
 --- a/thirdparty/plume/plume_metal.cpp
 +++ b/thirdparty/plume/plume_metal.cpp
-@@ -1619,6 +1619,14 @@ namespace plume {
+@@ -15,9 +15,11 @@
+ #include <CoreFoundation/CoreFoundation.h>
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <mutex>
+ 
+ #include "plume_metal.h"
++#include "plume_performance.h"
+ 
+ extern "C" {
+     void *objc_autoreleasePoolPush(void);
+@@ -43,6 +45,33 @@ namespace plume {
+         return (n + alignment - 1) & ~(alignment - 1);
+     }
+ 
++    // Preserve the descriptor's original defaults exactly. In particular, this
++    // is not one of the depth/stencil-writing clear states used below.
++    static MTL::DepthStencilState* createColorClearDepthState(MTL::Device* device) {
++        const uint64_t creationIndex = performance::enabled
++            ? performance::clearDepthStateCreations.fetch_add(1, std::memory_order_relaxed) : 0;
++        const bool sample = performance::enabled && ((creationIndex & 63) == 0);
++        const auto started = sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
++        MTL::DepthStencilDescriptor* descriptor = MTL::DepthStencilDescriptor::alloc()->init();
++        descriptor->setDepthWriteEnabled(false);
++        MTL::DepthStencilState* state = device->newDepthStencilState(descriptor);
++        descriptor->release();
++        if (sample) {
++            const auto elapsed = std::chrono::steady_clock::now() - started;
++            performance::count(performance::clearDepthStateCreateSamples);
++            performance::count(performance::clearDepthStateCreateNanoseconds,
++                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count()));
++        }
++        return state;
++    }
++
++    static void releaseColorClearDepthStates(const std::vector<MTL::DepthStencilState*>& states) {
++        for (auto* state : states) {
++            state->release();
++            performance::count(performance::clearDepthStateReleases);
++        }
++    }
++
+     uint64_t createClearPipelineKey(MTL::RenderPipelineDescriptor *pipelineDesc, bool depthWriteEnabled, bool stencilWriteEnabled) {
+         auto colorFormat = [&](uint32_t index) {
+             if (auto colorAttachment = pipelineDesc->colorAttachments()->object(index)) {
+@@ -1619,6 +1648,14 @@ namespace plume {
  
          if (error != nullptr) {
              fprintf(stderr, "MTLDevice newRenderPipelineState: failed with error %s.\n", error->localizedDescription()->utf8String());
@@ -3866,7 +4495,146 @@ index 2abe67c..e152038 100644
              return;
          }
  
-@@ -3796,7 +3804,14 @@ namespace plume {
+@@ -1974,6 +2011,8 @@ namespace plume {
+             lastPresentedIdCondVar.notify_all();
+         });
+ 
++        performance::count(performance::presentCommandBufferCommits);
++        performance::count(performance::commandBufferCommits);
+         presentBuffer->commit();
+ 
+         return true;
+@@ -2055,6 +2094,8 @@ namespace plume {
+         const MetalCommandSemaphore *interfaceSemaphore = static_cast<MetalCommandSemaphore *>(signalSemaphore);
+         acquireBuffer->enqueue();
+         acquireBuffer->encodeSignalEvent(interfaceSemaphore->mtl, interfaceSemaphore->mtlEventValue);
++        performance::count(performance::acquireCommandBufferCommits);
++        performance::count(performance::commandBufferCommits);
+         acquireBuffer->commit();
+ 
+         CA::MetalDrawable *nextDrawable = layer->nextDrawable();
+@@ -2243,6 +2284,9 @@ namespace plume {
+     MetalCommandList::~MetalCommandList() {
+         MetalAutoreleasePool releasePool;
+ 
++        // A list that was never committed still owns its temporary states.
++        releaseColorClearDepthStates(transientColorClearDepthStates);
++
+         if (mtl != nullptr) {
+             mtl->release();
+         }
+@@ -2258,6 +2302,7 @@ namespace plume {
+ 
+     void MetalCommandList::begin() {
+         assert(mtl == nullptr);
++        assert(transientColorClearDepthStates.empty());
+ 
+         MetalAutoreleasePool releasePool;
+         startedEncoding = false;
+@@ -2293,6 +2338,17 @@ namespace plume {
+     }
+ 
+     void MetalCommandList::commit() {
++        if (!transientColorClearDepthStates.empty()) {
++            // Command buffers use unretained references. Keep all temporary
++            // states alive until GPU completion, not merely until encoder end.
++            // This fixes the previous leak in both baseline and optimized modes.
++            std::vector<MTL::DepthStencilState*> completedStates;
++            completedStates.swap(transientColorClearDepthStates);
++            mtl->addCompletedHandler([completedStates](MTL::CommandBuffer*) {
++                releaseColorClearDepthStates(completedStates);
++            });
++        }
++        performance::count(performance::commandBufferCommits);
+         mtl->commit();
+         mtl->release();
+         mtl = nullptr;
+@@ -2782,6 +2838,7 @@ namespace plume {
+         // For full framebuffer clears, use the more efficient load action clear
+         MetalAutoreleasePool releasePool;
+         if (clearRectsCount == 0) {
++            performance::count(performance::fullColorClears);
+             pendingClears.initialAction[attachmentIndex] = MTL::LoadActionClear;
+             pendingClears.clearValues[attachmentIndex].color = colorValue;
+             pendingClears.active = true;
+@@ -2789,6 +2846,7 @@ namespace plume {
+         }
+ 
+         // For partial clears, do our own quad-based clear
++        performance::count(performance::partialColorClears);
+         checkActiveRenderEncoder();
+ 
+         // Store state cache
+@@ -2808,16 +2866,21 @@ namespace plume {
+ 
+         // Set pixel format for depth attachment if we have one, with write disabled
+         if (targetFramebuffer->depthAttachment.format != RenderFormat::UNKNOWN) {
++            performance::count(performance::partialColorClearsWithDepth);
+             pipelineDesc->setDepthAttachmentPixelFormat(targetFramebuffer->depthAttachment.getTexture()->pixelFormat());
+             if (RenderFormatIsStencil(targetFramebuffer->depthAttachment.format)) {
+                 pipelineDesc->setStencilAttachmentPixelFormat(pipelineDesc->depthAttachmentPixelFormat());
+             }
+-            MTL::DepthStencilDescriptor *depthStencilDescriptor = MTL::DepthStencilDescriptor::alloc()->init();
+-            depthStencilDescriptor->setDepthWriteEnabled(false);
+-            const MTL::DepthStencilState *depthStencilState = device->mtl->newDepthStencilState(depthStencilDescriptor);
+-            activeRenderEncoder->setDepthStencilState(depthStencilState);
+-
+-            depthStencilDescriptor->release();
++            if (device->colorClearNoWriteState != nullptr) {
++                performance::count(performance::cachedClearStateUses);
++                activeRenderEncoder->setDepthStencilState(device->colorClearNoWriteState);
++            } else {
++                MTL::DepthStencilState* depthStencilState = createColorClearDepthState(device->mtl);
++                if (depthStencilState != nullptr) {
++                    transientColorClearDepthStates.push_back(depthStencilState);
++                }
++                activeRenderEncoder->setDepthStencilState(depthStencilState);
++            }
+         }
+ 
+         const MTL::RenderPipelineState *pipelineState = device->getOrCreateClearRenderPipelineState(pipelineDesc);
+@@ -2872,6 +2935,7 @@ namespace plume {
+         if (clearDepth || clearStencil) {
+             // For full framebuffer clears, use the more efficient load action clear
+             if (clearRectsCount == 0) {
++                performance::count(performance::fullDepthStencilClears);
+                 const size_t depthIndex = targetFramebuffer->colorAttachments.size();
+ 
+                 if (clearDepth) {
+@@ -2889,6 +2953,7 @@ namespace plume {
+             }
+ 
+             // For partial clears, do our own quad-based clear
++            performance::count(performance::partialDepthStencilClears);
+             checkActiveRenderEncoder();
+ 
+             // Store state cache
+@@ -3108,6 +3173,7 @@ namespace plume {
+         colorAttachment->setStoreAction(MTL::StoreActionMultisampleResolve);
+ 
+         MTL::RenderCommandEncoder *encoder = mtl->renderCommandEncoder(renderPassDescriptor);
++        performance::count(performance::renderEncoderStarts);
+         encoder->setLabel(MTLSTR("Resolve Texture Encoder"));
+         encoder->endEncoding();
+     }
+@@ -3374,6 +3440,7 @@ namespace plume {
+             }
+ 
+             activeRenderEncoder = mtl->renderCommandEncoder(renderDescriptor);
++            performance::count(performance::renderEncoderStarts);
+             activeRenderEncoder->setLabel(MTLSTR("Graphics Render Encoder"));
+ 
+             barrierWait(MetalBarrierStage::GRAPHICS, activeRenderEncoder);
+@@ -3695,6 +3762,8 @@ namespace plume {
+             cmdBuffer->encodeWait(interfaceSemaphore->mtl, interfaceSemaphore->mtlEventValue++);
+         }
+ 
++        performance::count(performance::queueWaitCommandBufferCommits);
++        performance::count(performance::commandBufferCommits);
+         cmdBuffer->commit();
+ 
+         // Commit all command lists except the last one
+@@ -3796,7 +3865,14 @@ namespace plume {
  
          const std::string deviceName(mtl->name()->utf8String());
          description.name = deviceName;
@@ -3881,6 +4649,72 @@ index 2abe67c..e152038 100644
          description.driverVersion = 1; // Unavailable
          description.vendor = mtl->supportsFamily(MTL::GPUFamilyApple1) ? RenderDeviceVendor::APPLE : getRenderDeviceVendor(mtl->registryID());
          description.dedicatedVideoMemory = mtl->recommendedMaxWorkingSetSize();
+@@ -3868,6 +3944,10 @@ namespace plume {
+         clearVertexFunction->release();
+         clearColorFunction->release();
+         clearDepthFunction->release();
++        if (colorClearNoWriteState != nullptr) {
++            colorClearNoWriteState->release();
++            performance::count(performance::clearDepthStateReleases);
++        }
+         sharedBlitDescriptor->release();
+ 
+         if (residencySet != nullptr) {
+@@ -4109,6 +4189,12 @@ namespace plume {
+         clearColorFunction = clearShaderLibrary->newFunction(MTLSTR("clearColorFrag"));
+         clearDepthFunction = clearShaderLibrary->newFunction(MTLSTR("clearDepthFrag"));
+ 
++        // Immutable and device-owned, like the other cached pipeline states.
++        // The host selects the experiment before renderer/device construction.
++        if (performance::cacheClearState) {
++            colorClearNoWriteState = createColorClearDepthState(mtl);
++        }
++
+         // Create depth stencil clear states
+         MTL::StencilDescriptor *stencilDescriptor = MTL::StencilDescriptor::alloc()->init();
+         stencilDescriptor->setDepthStencilPassOperation(MTL::StencilOperationReplace);
+@@ -4160,7 +4246,9 @@ namespace plume {
+             std::lock_guard lock(resourcesMutex);
+             if (residencySet != nullptr) {
+                 residencySet->addAllocation(resource);
++                performance::count(performance::residencyAdds);
+                 residencySet->commit();
++                performance::count(performance::residencyCommits);
+             }
+             if (addressable) {
+                 gpuAddressableResources.push_back(resource);
+@@ -4173,7 +4261,9 @@ namespace plume {
+             std::lock_guard lock(resourcesMutex);
+             if (residencySet != nullptr) {
+                 residencySet->removeAllocation(resource);
++                performance::count(performance::residencyRemoves);
+                 residencySet->commit();
++                performance::count(performance::residencyCommits);
+             }
+             if (addressable) {
+                 const auto it = std::find(gpuAddressableResources.begin(), gpuAddressableResources.end(), resource);
+diff --git a/thirdparty/plume/plume_metal.h b/thirdparty/plume/plume_metal.h
+index 59ae129..66da6bf 100644
+--- a/thirdparty/plume/plume_metal.h
++++ b/thirdparty/plume/plume_metal.h
+@@ -350,6 +350,9 @@ namespace plume {
+         };
+ 
+         MTL::CommandBuffer *mtl = nullptr;
++        // Baseline color-clear states stay owned until GPU completion because
++        // the command buffer deliberately does not retain encoded resources.
++        std::vector<MTL::DepthStencilState*> transientColorClearDepthStates;
+         EncoderType activeType = EncoderType::None;
+         bool startedEncoding = false;
+         MTL::RenderCommandEncoder *activeRenderEncoder = nullptr;
+@@ -711,6 +714,7 @@ namespace plume {
+         MTL::DepthStencilState *clearDepthState;
+         MTL::DepthStencilState *clearStencilState;
+         MTL::DepthStencilState *clearDepthStencilState;
++        MTL::DepthStencilState *colorClearNoWriteState = nullptr;
+ 
+         std::mutex clearPipelineStateMutex;
+         std::unordered_map<uint64_t, MTL::RenderPipelineState *> clearRenderPipelineStates;
 diff --git a/tools/XenosRecomp/XenosRecomp/CMakeLists.txt b/tools/XenosRecomp/XenosRecomp/CMakeLists.txt
 index b187f59..d516a1e 100644
 --- a/tools/XenosRecomp/XenosRecomp/CMakeLists.txt

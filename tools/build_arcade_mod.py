@@ -88,6 +88,18 @@ def stage_source_directory(data_root: Path, source: str) -> Path:
     return directory
 
 
+def stage_append_archives(stage: dict) -> set[str]:
+    """Include shared parents required by the retail archive dependency tree."""
+
+    archives = set(stage.get("append", []))
+    if any(archive.startswith("Boss") for archive in archives):
+        # ArchiveTree.xml places every %Boss% archive underneath BossCommon.
+        # Mazuri Act 5 appends BossEggBeetle for its terrain, so it needs this
+        # parent even though the arcade selector never exposes the boss fight.
+        archives.add("BossCommon")
+    return archives
+
+
 def validate_payload(data_root: Path, catalog: dict) -> None:
     required = (
         data_root / "game" / "default.xex",
@@ -107,9 +119,15 @@ def validate_payload(data_root: Path, catalog: dict) -> None:
             archive_list = source / f"#{stage['archive']}.arl"
             if not archive_list.is_file():
                 missing.append(archive_list)
-            for appended in stage.get("append", []):
+            for appended in stage_append_archives(stage):
                 if not (data_root / "game" / f"{appended}.arl").is_file():
                     missing.append(data_root / "game" / f"{appended}.arl")
+                # The common family's sole base payload accompanies its list.
+                # A surviving .arl by itself does not make this dependency usable.
+                if appended == "BossCommon" and not (
+                    data_root / "game" / "BossCommon.ar.00"
+                ).is_file():
+                    missing.append(data_root / "game" / "BossCommon.ar.00")
             geometry = stage.get("geometry")
             if geometry and not any(
                 (candidate / f"{geometry}.arl").is_file()

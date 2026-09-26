@@ -199,10 +199,10 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..27b91f9 100644
+index 0205276..aa6c6f3 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -28,11 +28,22 @@
+@@ -28,11 +28,23 @@
  #include <ui/options_menu.h>
  #include <ui/game_window.h>
  #include <ui/black_bar.h>
@@ -221,11 +221,12 @@ index 0205276..27b91f9 100644
 +#include "pipeline_retry_policy.h"
 +#include "frame_limiter_policy.h"
 +#include "performance_experiments.h"
++#include "shader_warmup_tracker.h"
 +#endif
  
  #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
  #include <magic_enum/magic_enum.hpp>
-@@ -430,6 +441,41 @@ static Mutex g_pipelineCacheMutex;
+@@ -430,6 +442,51 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -241,6 +242,16 @@ index 0205276..27b91f9 100644
 +static std::atomic<uint32_t> g_diagnosticPipelineActive;
 +static std::atomic<uint64_t> g_diagnosticExitLoadingEntered;
 +static std::atomic<uint32_t> g_diagnosticExitLoadingActive;
++// Embedded producer task plus all background pipeline publications. Database
++// producers additionally use their existing readiness/count tokens unchanged.
++static ShaderWarmupTracker g_pipelinePublicationWarmup;
++static std::atomic<uint64_t> g_shaderRenderMisses;
++static std::atomic<uint64_t> g_shaderRenderMissNs;
++static std::atomic<uint64_t> g_shaderLoadingMisses;
++static std::atomic<uint64_t> g_shaderForegroundMisses;
++static std::atomic<uint64_t> g_shaderMissesOver16Ms;
++static std::atomic<uint64_t> g_shaderBackgroundCompiles;
++static std::atomic<uint64_t> g_shaderBackgroundCompileNs;
 +static std::mutex g_loadingDiagnosticMutex;
 +static std::string g_unresolvedPipelineDiagnostic;
 +static uint32_t g_unresolvedPipelineDiagnosticCount;
@@ -267,7 +278,27 @@ index 0205276..27b91f9 100644
  enum class PipelineTaskType
  {
      Null,
-@@ -766,6 +812,7 @@ static void DestructTempResources()
+@@ -449,6 +506,9 @@ static std::vector<PipelineTask> g_pipelineTaskQueue;
+ 
+ static void EnqueuePipelineTask(PipelineTaskType type, const boost::shared_ptr<Hedgehog::Database::CDatabaseData>& databaseData)
+ {
++#ifdef UNLEASHED_RECOMP_IOS
++    ShaderWarmupTicket prewarmTask(type == PipelineTaskType::PrecompilePipelines ? &g_pipelinePublicationWarmup : nullptr);
++#endif
+     // Precompiled pipelines deliberately do not increment
+     // this counter to overlap the compilation with intro logos.
+     if (type != PipelineTaskType::PrecompilePipelines)
+@@ -461,6 +521,9 @@ static void EnqueuePipelineTask(PipelineTaskType type, const boost::shared_ptr<H
+ 
+     if ((++g_pendingPipelineTaskCount) == 1)
+         g_pendingPipelineTaskCount.notify_one();
++#ifdef UNLEASHED_RECOMP_IOS
++    prewarmTask.Detach(); // PipelineTaskConsumerThread owns the parent acknowledgement.
++#endif
+ }
+ 
+ static const PipelineState g_pipelineStateCache[] =
+@@ -766,6 +829,7 @@ static void DestructTempResources()
  static std::thread::id g_presentThreadId = std::this_thread::get_id();
  static std::atomic<bool> g_readyForCommands;
  static std::atomic<bool> g_appSuspended = false;
@@ -275,7 +306,17 @@ index 0205276..27b91f9 100644
  
  PPC_FUNC_IMPL(__imp__sub_824ECA00);
  PPC_FUNC(sub_824ECA00)
-@@ -1428,6 +1475,7 @@ static void CreateImGuiBackend()
+@@ -982,6 +1046,9 @@ struct RenderCommand
+         {
+             XXH64_hash_t hash;
+             RenderPipeline* pipeline;
++#ifdef UNLEASHED_RECOMP_IOS
++            bool warmupCompletion;
++#endif
+         } addPipeline;
+ 
+         struct
+@@ -1428,6 +1495,7 @@ static void CreateImGuiBackend()
      MessageWindow::Init();
      OptionsMenu::Init();
      InstallerWizard::Init();
@@ -283,7 +324,21 @@ index 0205276..27b91f9 100644
  
      ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
  
-@@ -2613,6 +2661,7 @@ static void DrawFPS()
+@@ -1848,6 +1916,13 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
+         return false;
+     }
+ 
++#ifdef UNLEASHED_RECOMP_IOS
++    // Configure before LoadEmbeddedResources creates application shaders/PSOs.
++    // The backend degrades to ordinary compilation if persistence is unavailable.
++    g_device->configurePipelineCache((GetUserPath() / "ShaderCache").string(),
++        IOSPerformance::BundleString(CFSTR("PerformanceLabSourceSHA")) + "-shader-v1");
++#endif
++
+ #ifdef UNLEASHED_RECOMP_D3D12
+     if (graphicsApiRetry)
+     {
+@@ -2613,6 +2688,7 @@ static void DrawFPS()
      drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
  }
  
@@ -291,7 +346,7 @@ index 0205276..27b91f9 100644
  static void DrawImGui()
  {
      ImGui_ImplSDL2_NewFrame();
-@@ -2668,6 +2717,7 @@ static void DrawImGui()
+@@ -2668,6 +2744,7 @@ static void DrawImGui()
      ImGui::End();
  #endif
  
@@ -299,7 +354,7 @@ index 0205276..27b91f9 100644
      AchievementMenu::Draw();
      OptionsMenu::Draw();
      AchievementOverlay::Draw();
-@@ -2676,6 +2726,8 @@ static void DrawImGui()
+@@ -2676,6 +2753,8 @@ static void DrawImGui()
      ButtonGuide::Draw();
      Fader::Draw();
      BlackBar::Draw();
@@ -308,7 +363,7 @@ index 0205276..27b91f9 100644
  
      assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
  
-@@ -2849,19 +2901,13 @@ static bool g_pendingWaitOnSwapChain = true;
+@@ -2849,19 +2928,13 @@ static bool g_pendingWaitOnSwapChain = true;
  
  void Video::HandleApplicationBackgroundState(bool isBackgrounded)
  {
@@ -335,7 +390,7 @@ index 0205276..27b91f9 100644
  }
  
  void Video::WaitOnSwapChain()
-@@ -2882,8 +2928,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2955,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -394,7 +449,7 @@ index 0205276..27b91f9 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2905,6 +3001,17 @@ void Video::Present()
+@@ -2905,6 +3028,17 @@ void Video::Present()
      g_executedCommandList.wait(false);
      g_executedCommandList = false;
  
@@ -412,7 +467,7 @@ index 0205276..27b91f9 100644
      if (g_swapChainValid)
      {
          if (g_pendingWaitOnSwapChain)
-@@ -2957,10 +3064,29 @@ void Video::Present()
+@@ -2957,10 +3091,29 @@ void Video::Present()
  
          if (now < s_next)
          {
@@ -442,7 +497,7 @@ index 0205276..27b91f9 100644
          }
          else
          {
-@@ -2971,6 +3097,119 @@ void Video::Present()
+@@ -2971,6 +3124,132 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
@@ -548,6 +603,19 @@ index 0205276..27b91f9 100644
 +                g_pendingPipelineTaskCount.load(std::memory_order_relaxed),
 +                retry.valid ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - retry.updated).count() : -1.0));
 +            IOSPerformance::ReportBackendCounters();
++            IOSPerformance::Record(fmt::format(
++                "IOS-SHADER-SUMMARY v1 render_misses={} render_compile_ms={} loading_misses={} nonloading_foreground_misses={} render_over16ms={} background_compiles={} background_compile_ms={} prewarm_outstanding={}",
++                g_shaderRenderMisses.load(std::memory_order_relaxed),
++                double(g_shaderRenderMissNs.load(std::memory_order_relaxed)) / 1000000.0,
++                g_shaderLoadingMisses.load(std::memory_order_relaxed),
++                g_shaderForegroundMisses.load(std::memory_order_relaxed),
++                g_shaderMissesOver16Ms.load(std::memory_order_relaxed),
++                g_shaderBackgroundCompiles.load(std::memory_order_relaxed),
++                double(g_shaderBackgroundCompileNs.load(std::memory_order_relaxed)) / 1000000.0,
++                g_pipelinePublicationWarmup.Outstanding()));
++            const auto shaderCacheStatus = g_device->getPipelineCacheStatus();
++            if (!shaderCacheStatus.empty())
++                IOSPerformance::Record(shaderCacheStatus);
 +            intervals = {};
 +            gpuTimestampSum = 0.0;
 +            g_limiterDiagnosticTotals.windowMaxOvershootNs = 0;
@@ -562,7 +630,7 @@ index 0205276..27b91f9 100644
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3331,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3371,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -572,39 +640,195 @@ index 0205276..27b91f9 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -6398,6 +6640,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -4288,7 +4570,32 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
+     auto& pipeline = g_pipelines[hash];
+     if (pipeline == nullptr)
+     {
++#ifdef UNLEASHED_RECOMP_IOS
++        const auto compileStart = std::chrono::steady_clock::now();
++        const bool compilingWhileLoading = IOSPerformance::IsLoading();
++        const bool compilingWhilePaused = IOSPerformance::IsPaused();
++        const bool compilingWhileSuspended = IOSPerformance::IsSuspended();
++#endif
+         pipeline = CreateGraphicsPipeline(pipelineState);
++#ifdef UNLEASHED_RECOMP_IOS
++        const uint64_t compileNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
++            std::chrono::steady_clock::now() - compileStart).count();
++        const uint64_t ordinal = g_shaderRenderMisses.fetch_add(1, std::memory_order_relaxed) + 1;
++        g_shaderRenderMissNs.fetch_add(compileNs, std::memory_order_relaxed);
++        if (compilingWhileLoading)
++            g_shaderLoadingMisses.fetch_add(1, std::memory_order_relaxed);
++        else if (!compilingWhilePaused && !compilingWhileSuspended)
++            g_shaderForegroundMisses.fetch_add(1, std::memory_order_relaxed);
++        if (compileNs > 16000000)
++            g_shaderMissesOver16Ms.fetch_add(1, std::memory_order_relaxed);
++        // Bound per-pipeline records; cumulative summaries continue for the session.
++        if (ordinal <= 128 || (ordinal <= 512 && compileNs > 50000000))
++            IOSPerformance::Record(fmt::format(
++                "IOS-SHADER-FALLBACK v1 hash={:016X} ordinal={} thread=render compile_ms={} loading_at_start={} paused_at_start={} suspended_at_start={} wrapper_created={} prewarm_outstanding={}",
++                hash, ordinal, double(compileNs) / 1000000.0, compilingWhileLoading,
++                compilingWhilePaused, compilingWhileSuspended, pipeline != nullptr,
++                g_pipelinePublicationWarmup.Outstanding()));
++#endif
+ 
+ #ifdef ASYNC_PSO_DEBUG
+         bool loading = *SWA::SGlobals::ms_IsLoading;
+@@ -4581,11 +4888,21 @@ static void ProcSetPixelShaderConstants(const RenderCommand& cmd)
+ static void ProcAddPipeline(const RenderCommand& cmd)
+ {
+     auto& args = cmd.addPipeline;
++#ifdef UNLEASHED_RECOMP_IOS
++    // The render thread never waits for a compiler. It acknowledges only after
++    // insertion or duplicate disposal, so the loading gate also covers publication.
++    auto prewarmPublication = ShaderWarmupTicket::Adopt(args.warmupCompletion ? &g_pipelinePublicationWarmup : nullptr);
++    std::unique_ptr<RenderPipeline> incomingPipeline(args.pipeline);
++#endif
+     auto& pipeline = g_pipelines[args.hash];
+ 
+     if (pipeline == nullptr)
+     {
++#ifdef UNLEASHED_RECOMP_IOS
++        pipeline = std::move(incomingPipeline);
++#else
+         pipeline = std::unique_ptr<RenderPipeline>(args.pipeline);
++#endif
+ #ifdef ASYNC_PSO_DEBUG
+         ++g_pipelinesCreatedAsynchronously;
+ #endif
+@@ -4595,7 +4912,9 @@ static void ProcAddPipeline(const RenderCommand& cmd)
+ #ifdef ASYNC_PSO_DEBUG
+         ++g_pipelinesDropped;
+ #endif
++#ifndef UNLEASHED_RECOMP_IOS
+         delete args.pipeline;
++#endif
+     }
+ }
+ 
+@@ -6385,6 +6704,9 @@ struct PipelineStateQueueItem
+     XXH64_hash_t pipelineHash;
+     PipelineState pipelineState;
+     std::shared_ptr<PipelineTaskToken> token;
++#ifdef UNLEASHED_RECOMP_IOS
++    bool warmupCompletion = false;
++#endif
+ #ifdef ASYNC_PSO_DEBUG
+     std::string pipelineName;
+ #endif
+@@ -6393,11 +6715,20 @@ struct PipelineStateQueueItem
+ static moodycamel::BlockingConcurrentQueue<PipelineStateQueueItem> g_pipelineStateQueue;
+ 
+ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipelineState
++#ifdef UNLEASHED_RECOMP_IOS
++    , bool warmupCompletion
++#endif
+ #ifdef ASYNC_PSO_DEBUG
+     , const std::string& pipelineName
  #endif
  )
  {
 +#ifdef UNLEASHED_RECOMP_IOS
++    auto prewarmPublication = ShaderWarmupTicket::Adopt(warmupCompletion ? &g_pipelinePublicationWarmup : nullptr);
++    const auto compileStart = std::chrono::steady_clock::now();
 +    g_diagnosticPipelineStarted.fetch_add(1, std::memory_order_relaxed);
 +    g_diagnosticPipelineActive.fetch_add(1, std::memory_order_relaxed);
 +#endif
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6409,6 +6655,10 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6407,8 +6738,27 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+     RenderCommand cmd;
+     cmd.type = RenderCommandType::AddPipeline;
      cmd.addPipeline.hash = pipelineHash;
++#ifdef UNLEASHED_RECOMP_IOS
++    cmd.addPipeline.pipeline = pipeline.get();
++    cmd.addPipeline.warmupCompletion = warmupCompletion;
++    // A rejected queue insertion must not leak either the PSO or its gate ticket.
++    if (g_renderQueue.enqueue(cmd))
++    {
++        pipeline.release();
++        prewarmPublication.Detach();
++    }
++#else
      cmd.addPipeline.pipeline = pipeline.release();
      g_renderQueue.enqueue(cmd);
++#endif
 +#ifdef UNLEASHED_RECOMP_IOS
++    const uint64_t compileNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
++        std::chrono::steady_clock::now() - compileStart).count();
++    g_shaderBackgroundCompiles.fetch_add(1, std::memory_order_relaxed);
++    g_shaderBackgroundCompileNs.fetch_add(compileNs, std::memory_order_relaxed);
 +    g_diagnosticPipelineCompleted.fetch_add(1, std::memory_order_relaxed);
 +    g_diagnosticPipelineActive.fetch_sub(1, std::memory_order_relaxed);
 +#endif
  }
  
  static void PipelineCompilerThread()
-@@ -6514,6 +6764,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6446,6 +6796,9 @@ static void PipelineCompilerThread()
+ #endif
+ 
+         CompilePipeline(queueItem.pipelineHash, queueItem.pipelineState
++#ifdef UNLEASHED_RECOMP_IOS
++            , queueItem.warmupCompletion
++#endif
+ #ifdef ASYNC_PSO_DEBUG
+             , queueItem.pipelineName.c_str()
+ #endif
+@@ -6493,6 +6846,7 @@ static void EnqueueGraphicsPipelineCompilation(
+ 
+     if (shouldCompile)
+     {
++#ifndef UNLEASHED_RECOMP_IOS
+         bool loading = *SWA::SGlobals::ms_IsLoading;
+         if (!loading && isPrecompiledPipeline)
+         {
+@@ -6504,7 +6858,9 @@ static void EnqueueGraphicsPipelineCompilation(
+             );
+         }
+         else
++#endif
+         {
++            // iOS always uses the existing compiler pool, including during logos.
+             if (tokenPair.sharedToken == nullptr && tokenPair.token.type != PipelineTaskType::Null)
+                 tokenPair.sharedToken = std::make_shared<PipelineTaskToken>(std::move(tokenPair.token));
+ 
+@@ -6512,10 +6868,35 @@ static void EnqueueGraphicsPipelineCompilation(
+             queueItem.pipelineHash = hash;
+             queueItem.pipelineState = pipelineState;
              queueItem.token = tokenPair.sharedToken;
++#ifdef UNLEASHED_RECOMP_IOS
++            // Include DatabaseData/Recompile results as well: their existing
++            // tokens finish on compiler return, before render-cache publication.
++            ShaderWarmupTicket prewarmPublication(&g_pipelinePublicationWarmup);
++            queueItem.warmupCompletion = prewarmPublication.Active();
++#endif
  #ifdef ASYNC_PSO_DEBUG
              queueItem.pipelineName = fmt::format("ASYNC {} {:X}", name, hash);
-+#endif
+ #endif
 +#ifdef UNLEASHED_RECOMP_IOS
 +            g_diagnosticPipelineQueued.fetch_add(1, std::memory_order_relaxed);
- #endif
++#endif
++#ifdef UNLEASHED_RECOMP_IOS
++            if (g_pipelineStateQueue.enqueue(queueItem))
++                prewarmPublication.Detach();
++            else
++            {
++                // No queued consumer owns it: finish on this background thread.
++                // Detach first because CompilePipeline adopts the acknowledgement.
++                prewarmPublication.Detach();
++                CompilePipeline(hash, pipelineState, queueItem.warmupCompletion
++#ifdef ASYNC_PSO_DEBUG
++                    , queueItem.pipelineName
++#endif
++                );
++            }
++#else
              g_pipelineStateQueue.enqueue(queueItem);
++#endif
          }
-@@ -7086,27 +7339,57 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+     }
+ 
+@@ -7086,27 +7467,85 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -652,6 +876,34 @@ index 0205276..27b91f9 100644
 +#ifdef UNLEASHED_RECOMP_IOS
 +    if (loggedWait)
 +        LOGN("iOS loading: pipeline tasks completed.");
++    const auto prewarmWaitStart = std::chrono::steady_clock::now();
++    const uint32_t prewarmOutstanding = g_pipelinePublicationWarmup.Outstanding();
++    const auto prewarmDeadline = prewarmWaitStart + std::chrono::seconds(30);
++    bool prewarmComplete = g_pipelinePublicationWarmup.Outstanding() == 0;
++    while (!prewarmComplete && std::chrono::steady_clock::now() < prewarmDeadline)
++    {
++        const auto progressDeadline = std::min(prewarmDeadline,
++            std::chrono::steady_clock::now() + std::chrono::seconds(5));
++        prewarmComplete = g_pipelinePublicationWarmup.WaitUntil(progressDeadline);
++        if (!prewarmComplete)
++            IOSPerformance::Record(fmt::format(
++                "IOS-SHADER-WARMUP v1 event=waiting outstanding={} elapsed_ms={}",
++                g_pipelinePublicationWarmup.Outstanding(), std::chrono::duration<double, std::milli>(
++                    std::chrono::steady_clock::now() - prewarmWaitStart).count()));
++    }
++    IOSPerformance::Record(fmt::format(
++        "IOS-SHADER-WARMUP v1 event=stage_gate complete={} outstanding_at_start={} outstanding={} wait_ms={}",
++        prewarmComplete, prewarmOutstanding, g_pipelinePublicationWarmup.Outstanding(), std::chrono::duration<double, std::milli>(
++            std::chrono::steady_clock::now() - prewarmWaitStart).count()));
++    // Timeout does NOT cancel/zero pending tickets or skip draws. The original
++    // synchronous cache-miss path remains correct while late results are published.
++    // Archive harvesting/serialization is restricted to this loading boundary.
++    // Metal independently synchronizes archive access with loading-screen draws.
++    if (prewarmComplete)
++        g_device->checkpointPipelineCache();
++    const auto shaderCacheStatus = g_device->getPipelineCacheStatus();
++    if (!shaderCacheStatus.empty())
++        IOSPerformance::Record(shaderCacheStatus);
 +#endif
 +
      __imp__sub_825369A0(ctx, base);
@@ -662,7 +914,7 @@ index 0205276..27b91f9 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7556,11 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7712,11 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -674,7 +926,7 @@ index 0205276..27b91f9 100644
  
      while (true)
      {
-@@ -7291,9 +7579,26 @@ static void PipelineTaskConsumerThread()
+@@ -7291,9 +7735,26 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -701,7 +953,7 @@ index 0205276..27b91f9 100644
              switch (type)
              {
              case PipelineTaskType::DatabaseData:
-@@ -7358,6 +7663,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7819,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -723,15 +975,25 @@ index 0205276..27b91f9 100644
                  }
  
                  break;
-@@ -7513,11 +7833,54 @@ static void PipelineTaskConsumerThread()
+@@ -7365,6 +7841,9 @@ static void PipelineTaskConsumerThread()
+ 
+             case PipelineTaskType::PrecompilePipelines:
+             {
++#ifdef UNLEASHED_RECOMP_IOS
++                auto prewarmParent = ShaderWarmupTicket::Adopt(&g_pipelinePublicationWarmup);
++#endif
+                 // Deliberately leaving the type null to account for the enqueue
+                 // call not incrementing the compiling pipeline task counter.
+                 PipelineTaskTokenPair tokenPair;
+@@ -7513,11 +7992,54 @@ static void PipelineTaskConsumerThread()
                  break;
              }
              }
 +#ifdef UNLEASHED_RECOMP_IOS
 +            madeProgress |= previousType != type;
 +#endif
-         }
- 
++        }
++
 +#ifdef UNLEASHED_RECOMP_IOS
 +        const bool stalled = !allHandled && !madeProgress;
 +        noProgressPasses += stalled;
@@ -753,7 +1015,7 @@ index 0205276..27b91f9 100644
 +                LOGFN("IOS-RETRY v1 enabled={} passes={} stalled={} backoffs={} thread_cpu_ms={} cpu_valid={}",
 +                    retryBackoffEnabled, retryPasses, noProgressPasses, backoffs, cpuMs, cpuValid);
 +            }
-+        }
+         }
 +        if (sampleUnresolved)
 +        {
 +            nextUnresolvedSample = diagnosticNow + std::chrono::seconds(5);
@@ -763,7 +1025,7 @@ index 0205276..27b91f9 100644
 +            g_unresolvedPipelineDiagnosticTime = diagnosticNow;
 +        }
 +#endif
-+
+ 
          if (allHandled)
              localPipelineTaskQueue.clear();
  
@@ -2032,7 +2294,7 @@ index 0000000..736b084
 +}
 +}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-index 817db38..4bfd0d1 100644
+index 817db38..c890dc5 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 +++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 @@ -6,28 +6,73 @@
@@ -2070,7 +2332,7 @@ index 817db38..4bfd0d1 100644
 -        <string>Unleashed Recompiled</string>
 -        <key>CFBundleIconName</key>
 -        <string>AppIcon</string>
-+        <string>Unleashed Perf Lab</string>
++        <string>Sonic Unleashed</string>
 +        <key>CFBundleIconFiles</key>
 +        <array>
 +            <string>Icon-20</string>
@@ -2129,7 +2391,7 @@ index 817db38..4bfd0d1 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..ef92797 100644
+index d9130f4..48f5779 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -2137,7 +2399,7 @@ index d9130f4..ef92797 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=15
++VERSION_REVISION=16
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
 index 5f1259a..2884035 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
@@ -3445,10 +3707,10 @@ index 0000000..33bc0bd
 +}
 diff --git a/UnleashedRecomp/gpu/performance_experiments.h b/UnleashedRecomp/gpu/performance_experiments.h
 new file mode 100644
-index 0000000..5b31729
+index 0000000..26641b9
 --- /dev/null
 +++ b/UnleashedRecomp/gpu/performance_experiments.h
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,194 @@
 +#pragma once
 +#ifdef UNLEASHED_RECOMP_IOS
 +#include "performance_profile.h"
@@ -3466,7 +3728,7 @@ index 0000000..5b31729
 +
 +namespace IOSPerformance
 +{
-+inline constexpr const char* Build = "perf-lab-1.0.15";
++inline constexpr const char* Build = "shader-warmup-1.0.16";
 +struct Config
 +{
 +    bool retryBackoff = false;
@@ -3489,7 +3751,10 @@ index 0000000..5b31729
 +        std::string name;
 +        if (!exists && !ec)
 +        {
-+            name = "all";
++            // Prior experiments did not establish a throughput improvement.
++            // Keep their policies off by default in the shader-fix candidate;
++            // an explicit existing profile still selects the requested flags.
++            name = "baseline";
 +            c.defaulted = true;
 +        }
 +        else
@@ -3640,6 +3905,83 @@ index 0000000..5b31729
 +}
 +}
 +#endif
+diff --git a/UnleashedRecomp/gpu/shader_warmup_tracker.h b/UnleashedRecomp/gpu/shader_warmup_tracker.h
+new file mode 100644
+index 0000000..e0ef176
+--- /dev/null
++++ b/UnleashedRecomp/gpu/shader_warmup_tracker.h
+@@ -0,0 +1,71 @@
++#pragma once
++
++#include <atomic>
++#include <cassert>
++#include <chrono>
++#include <cstdint>
++#include <thread>
++#include <utility>
++
++// Counts the producer task as well as each unpublished result. A loading-thread
++// waiter must not observe zero while the producer is still discovering work.
++// Completion belongs to render-cache publication, not compiler completion.
++class ShaderWarmupTracker
++{
++    std::atomic<uint32_t> outstanding{0};
++
++public:
++    void Acquire() { outstanding.fetch_add(1, std::memory_order_acq_rel); }
++    void Release()
++    {
++        const uint32_t previous = outstanding.fetch_sub(1, std::memory_order_acq_rel);
++        assert(previous != 0);
++        if (previous == 1)
++            outstanding.notify_all();
++    }
++    uint32_t Outstanding() const { return outstanding.load(std::memory_order_acquire); }
++    void Wait() const
++    {
++        uint32_t value;
++        while ((value = Outstanding()) != 0)
++            outstanding.wait(value, std::memory_order_acquire);
++    }
++    bool WaitUntil(std::chrono::steady_clock::time_point deadline) const
++    {
++        // Atomic wait has no timeout in C++20. This bounded, sleeping wait is
++        // only used by the guest/loading thread, never the render or UIKit thread.
++        while (Outstanding() != 0)
++        {
++            const auto now = std::chrono::steady_clock::now();
++            if (now >= deadline)
++                return false;
++            const auto remaining = deadline - now;
++            const auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::milliseconds(10));
++            std::this_thread::sleep_for(remaining < interval ? remaining : interval);
++        }
++        return true;
++    }
++};
++
++// Detach only after transferring the acknowledgement to a queue item. Adopt
++// releases that acknowledgement on every consumer exit, including exceptions.
++class ShaderWarmupTicket
++{
++    ShaderWarmupTracker* tracker = nullptr;
++    explicit ShaderWarmupTicket(ShaderWarmupTracker* value, bool acquire) : tracker(value)
++    {
++        if (tracker != nullptr && acquire)
++            tracker->Acquire();
++    }
++
++public:
++    ShaderWarmupTicket() = default;
++    explicit ShaderWarmupTicket(ShaderWarmupTracker* value) : ShaderWarmupTicket(value, true) {}
++    static ShaderWarmupTicket Adopt(ShaderWarmupTracker* value) { return ShaderWarmupTicket(value, false); }
++    ShaderWarmupTicket(const ShaderWarmupTicket&) = delete;
++    ShaderWarmupTicket& operator=(const ShaderWarmupTicket&) = delete;
++    ShaderWarmupTicket(ShaderWarmupTicket&& other) noexcept : tracker(std::exchange(other.tracker, nullptr)) {}
++    ~ShaderWarmupTicket() { if (tracker != nullptr) tracker->Release(); }
++    bool Active() const { return tracker != nullptr; }
++    void Detach() { tracker = nullptr; }
++};
 diff --git a/thirdparty/plume/plume_performance.h b/thirdparty/plume/plume_performance.h
 new file mode 100644
 index 0000000..b7847f2
@@ -3687,6 +4029,66 @@ index 0000000..b7847f2
 +        if (enabled) {
 +            counter.fetch_add(amount, std::memory_order_relaxed);
 +        }
++    }
++}
+diff --git a/thirdparty/plume/plume_pipeline_cache_policy.h b/thirdparty/plume/plume_pipeline_cache_policy.h
+new file mode 100644
+index 0000000..aa87ea3
+--- /dev/null
++++ b/thirdparty/plume/plume_pipeline_cache_policy.h
+@@ -0,0 +1,54 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <string_view>
++
++namespace plume::pipeline_cache {
++    inline constexpr size_t MaxPendingDescriptors = 1024;
++    inline constexpr uint64_t MaxArchiveBytes = 64ull * 1024 * 1024;
++    inline constexpr uint64_t HarvestBudgetNanoseconds = 5ull * 1000 * 1000 * 1000;
++    inline constexpr bool SupportsSpecializedArchive(uint64_t iosMajor) { return iosMajor >= 18; }
++    inline constexpr bool ValidArchiveSize(uint64_t bytes) { return bytes > 0 && bytes <= MaxArchiveBytes; }
++    inline constexpr bool ValidNamespace(std::string_view value) {
++        // This app supplies an exact source SHA plus a versioned shader schema.
++        // An unavailable build identity must not silently share another cache.
++        if (value.size() < 42 || value.size() > 512 || value[40] != '-') return false;
++        for (size_t i = 0; i < 40; ++i) {
++            const char c = value[i];
++            if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') && !(c >= 'A' && c <= 'F')) return false;
++        }
++        for (size_t i = 41; i < value.size(); ++i) {
++            const char c = value[i];
++            if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && c != '-' && c != '_') return false;
++        }
++        return true;
++    }
++
++    // Stable non-security filename identifier, not a shader or trust checksum.
++    // Metal validates each complete pipeline descriptor against archive content.
++    inline uint64_t HashIdentity(std::string_view identity) {
++        uint64_t value = 14695981039346656037ull;
++        for (unsigned char c : identity) {
++            value ^= c;
++            value *= 1099511628211ull;
++        }
++        return value;
++    }
++
++    inline std::string CacheKey(std::string_view nameSpace, std::string_view gpu,
++        std::string_view machine, std::string_view osBuild) {
++        std::string identity = "metal3-archive-v1";
++        for (auto part : {nameSpace, gpu, machine, osBuild}) {
++            // Length prefixes make component boundaries unambiguous.
++            identity += '|' + std::to_string(part.size()) + ':';
++            identity.append(part);
++        }
++        const auto hash = HashIdentity(identity);
++        constexpr char Hex[] = "0123456789abcdef";
++        std::string key(16, '0');
++        for (size_t i = 0; i < 16; ++i) key[15 - i] = Hex[(hash >> (i * 4)) & 15];
++        return key;
 +    }
 +}
 diff --git a/UnleashedRecomp/patches/arcade_selector_patches.cpp b/UnleashedRecomp/patches/arcade_selector_patches.cpp
@@ -4433,22 +4835,363 @@ index 59e2d07..b9dfd5e 100644
 +    SWA_ASSERT_OFFSETOF(CHudSonicStage, m_rcPlayerCount, 0x148);
  }
 diff --git a/thirdparty/plume/plume_metal.cpp b/thirdparty/plume/plume_metal.cpp
-index 2abe67c..1478240 100644
+index 2abe67c..961e3ab 100644
 --- a/thirdparty/plume/plume_metal.cpp
 +++ b/thirdparty/plume/plume_metal.cpp
-@@ -15,9 +15,11 @@
+@@ -15,9 +15,18 @@
  #include <CoreFoundation/CoreFoundation.h>
  
  #include <algorithm>
 +#include <chrono>
++#include <cstdio>
++#include <deque>
++#include <filesystem>
  #include <mutex>
++#include <shared_mutex>
++#include <sys/sysctl.h>
++#include <utility>
  
  #include "plume_metal.h"
 +#include "plume_performance.h"
++#include "plume_pipeline_cache_policy.h"
  
  extern "C" {
      void *objc_autoreleasePoolPush(void);
-@@ -43,6 +45,33 @@ namespace plume {
+@@ -25,6 +34,333 @@ extern "C" {
+ }
+ 
+ namespace plume {
++    struct MetalAutoreleasePool {
++        void* pool;
++        MetalAutoreleasePool() : pool(objc_autoreleasePoolPush()) { }
++        ~MetalAutoreleasePool() { objc_autoreleasePoolPop(pool); }
++    };
++
++    // One device owns one archive. Gameplay only reads it; descriptor harvesting
++    // and serialization are restricted to the host's explicit loading checkpoint.
++    // A cache error must never remove a draw or replace a pipeline's descriptor.
++    struct MetalPipelineArchive {
++        using Clock = std::chrono::steady_clock;
++        struct PendingDescriptor {
++            MTL::RenderPipelineDescriptor* render = nullptr;
++            MTL::ComputePipelineDescriptor* compute = nullptr;
++            PendingDescriptor(MTL::RenderPipelineDescriptor* value) : render(value) { }
++            PendingDescriptor(MTL::ComputePipelineDescriptor* value) : compute(value) { }
++            PendingDescriptor(const PendingDescriptor&) = delete;
++            PendingDescriptor& operator=(const PendingDescriptor&) = delete;
++            PendingDescriptor(PendingDescriptor&& other) noexcept
++                : render(std::exchange(other.render, nullptr)), compute(std::exchange(other.compute, nullptr)) { }
++            ~PendingDescriptor() {
++                if (render) render->release();
++                if (compute) compute->release();
++            }
++        };
++
++        MTL::Device* device; // Owner MetalDevice outlives this manager.
++        MTL::BinaryArchive* archive = nullptr;
++        mutable std::shared_mutex archiveMutex;
++        std::mutex pendingMutex;
++        std::deque<PendingDescriptor> pending;
++        std::filesystem::path file;
++        std::string key = "none";
++        bool dirty = false; // Exclusive archive lock only.
++        std::atomic<bool> enabled{false};
++        std::atomic<bool> collecting{false};
++        std::atomic<const char*> status{"unconfigured"};
++        std::atomic<uint64_t> loads{0}, loadErrors{0}, hits{0}, missesOrErrors{0};
++        std::atomic<uint64_t> fallbackCompiles{0}, fallbackFailures{0}, queued{0}, dropped{0}, pendingCount{0};
++        std::atomic<uint64_t> harvested{0}, harvestErrors{0}, saves{0}, saveErrors{0}, archiveBytes{0};
++        std::atomic<uint64_t> lookupNs{0}, fallbackNs{0}, harvestNs{0}, serializeNs{0}, checkpoints{0};
++        std::atomic<uint64_t> harvestInFlight{0}, harvestBudgetYields{0};
++
++        static uint64_t elapsed(Clock::time_point start) {
++            return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
++        }
++        static void increment(std::atomic<uint64_t>& value, uint64_t count = 1) {
++            value.fetch_add(count, std::memory_order_relaxed);
++        }
++        static std::string systemString(const char* name) {
++            char value[256]{};
++            size_t size = sizeof(value);
++            if (sysctlbyname(name, value, &size, nullptr, 0) != 0 || size == 0 || size > sizeof(value)) return {};
++            value[sizeof(value) - 1] = '\0';
++            return value;
++        }
++        static NS::URL* url(const std::filesystem::path& path) {
++            return NS::URL::fileURLWithPath(NS::String::string(path.c_str(), NS::UTF8StringEncoding));
++        }
++        void log(const char* event, const NS::Error* error = nullptr) const {
++            // Never print sandbox paths or personalized filesystem locations.
++            fprintf(stderr, "IOS-SHADER-ARCHIVE v1 event=%s key=%s error_code=%lld\n",
++                event, key.c_str(), error ? static_cast<long long>(error->code()) : 0ll);
++        }
++
++        MetalPipelineArchive(MTL::Device* value, const std::string& directory, const std::string& nameSpace) : device(value) {
++            MetalAutoreleasePool releasePool;
++#if !PLUME_IOS
++            status = "unsupported_platform";
++            return;
++#endif
++            const auto os = NS::ProcessInfo::processInfo()->operatingSystemVersion();
++            if (!pipeline_cache::SupportsSpecializedArchive(os.majorVersion)) {
++                status = "unsupported_os";
++                return;
++            }
++            const std::string osBuild = systemString("kern.osversion");
++            const std::string machine = systemString("hw.machine");
++            if (directory.empty() || !pipeline_cache::ValidNamespace(nameSpace) || osBuild.empty() || machine.empty()) {
++                status = "invalid_identity";
++                return;
++            }
++            const std::filesystem::path root(directory);
++            if (!root.is_absolute()) {
++                status = "invalid_directory";
++                return;
++            }
++            std::error_code ec;
++            std::filesystem::create_directories(root, ec);
++            if (ec) {
++                status = "directory_unavailable";
++                return;
++            }
++            key = pipeline_cache::CacheKey(nameSpace, device->name()->utf8String(), machine, osBuild);
++            file = root / ("metal3-" + key + ".metallib");
++            auto* descriptor = MTL::BinaryArchiveDescriptor::alloc()->init();
++            NS::Error* error = nullptr;
++            const bool exists = std::filesystem::exists(file, ec);
++            if (exists && !ec) {
++                const auto bytes = std::filesystem::file_size(file, ec);
++                if (!ec && pipeline_cache::ValidArchiveSize(bytes)) {
++                    descriptor->setUrl(url(file));
++                    archive = device->newBinaryArchive(descriptor, &error);
++                    if (archive != nullptr) {
++                        increment(loads);
++                        archiveBytes = bytes;
++                        status = "loaded";
++                    }
++                }
++                if (archive == nullptr) {
++                    increment(loadErrors);
++                    log("load_rejected_fallback", error);
++                }
++            } else if (ec) {
++                increment(loadErrors);
++                log("load_io_fallback");
++            }
++            if (archive == nullptr) {
++                descriptor->setUrl(nullptr);
++                error = nullptr;
++                archive = device->newBinaryArchive(descriptor, &error);
++                status = archive ? "cold" : "archive_unavailable";
++                if (!archive) log("create_failed_fallback", error);
++            }
++            descriptor->release();
++            enabled.store(archive != nullptr, std::memory_order_release);
++            collecting.store(archive != nullptr, std::memory_order_release);
++            log(archive ? "configured" : "disabled");
++        }
++
++        ~MetalPipelineArchive() {
++            // The host destroys the device after its compilation users are done.
++            // No shutdown serialization: iOS can terminate without this callback.
++            pending.clear();
++            if (archive) archive->release();
++        }
++
++        template<class Descriptor>
++        void enqueue(Descriptor* descriptor) {
++            if (!collecting.load(std::memory_order_acquire)) return;
++            // Copy keeps specialized functions alive. No attached archive is
++            // retained by this descriptor, so there is no ownership cycle.
++            auto* retained = descriptor->copy();
++            if (!retained) { increment(dropped); return; }
++            retained->setBinaryArchives(nullptr);
++            std::lock_guard lock(pendingMutex);
++            if (!collecting.load(std::memory_order_acquire)) {
++                retained->release();
++                increment(dropped);
++                return;
++            }
++            if (pending.size() >= pipeline_cache::MaxPendingDescriptors) {
++                // Prefer recent stage-specific pipelines over an older startup
++                // backlog. Eviction only loses future cache benefit, not draws.
++                pending.pop_front();
++                increment(dropped);
++            }
++            pending.emplace_back(retained);
++            increment(queued);
++            pendingCount.store(pending.size(), std::memory_order_relaxed);
++        }
++
++        MTL::RenderPipelineState* create(MTL::RenderPipelineDescriptor* descriptor, NS::Error** error) {
++            {
++                std::shared_lock lock(archiveMutex);
++                if (archive) {
++                    descriptor->setBinaryArchives(NS::Array::array(archive));
++                    NS::Error* lookupError = nullptr;
++                    const auto start = Clock::now();
++                    auto* state = device->newRenderPipelineState(descriptor, MTL::PipelineOptionFailOnBinaryArchiveMiss, nullptr, &lookupError);
++                    increment(lookupNs, elapsed(start));
++                    descriptor->setBinaryArchives(nullptr);
++                    if (state) {
++                        increment(hits);
++                        if (error) *error = nullptr;
++                        return state;
++                    }
++                    // A strict failure may be a genuine miss or invalid cache;
++                    // never claim a hit from a normal compiler fallback.
++                    increment(missesOrErrors);
++                }
++            }
++            const auto start = Clock::now();
++            if (error) *error = nullptr;
++            auto* state = device->newRenderPipelineState(descriptor, error);
++            increment(fallbackCompiles);
++            increment(fallbackNs, elapsed(start));
++            if (state) enqueue(descriptor); else increment(fallbackFailures);
++            return state;
++        }
++
++        MTL::ComputePipelineState* create(MTL::ComputePipelineDescriptor* descriptor, NS::Error** error) {
++            {
++                std::shared_lock lock(archiveMutex);
++                if (archive) {
++                    descriptor->setBinaryArchives(NS::Array::array(archive));
++                    NS::Error* lookupError = nullptr;
++                    const auto start = Clock::now();
++                    auto* state = device->newComputePipelineState(descriptor, MTL::PipelineOptionFailOnBinaryArchiveMiss, nullptr, &lookupError);
++                    increment(lookupNs, elapsed(start));
++                    descriptor->setBinaryArchives(nullptr);
++                    if (state) {
++                        increment(hits);
++                        if (error) *error = nullptr;
++                        return state;
++                    }
++                    increment(missesOrErrors);
++                }
++            }
++            const auto start = Clock::now();
++            if (error) *error = nullptr;
++            auto* state = device->newComputePipelineState(descriptor, MTL::PipelineOptionNone, nullptr, error);
++            increment(fallbackCompiles);
++            increment(fallbackNs, elapsed(start));
++            if (state) enqueue(descriptor); else increment(fallbackFailures);
++            return state;
++        }
++
++        void checkpoint() {
++            MetalAutoreleasePool releasePool;
++            // Mutating or serializing an archive cannot overlap lookup on that
++            // archive. This is not resourcesMutex and fallback compiles remain
++            // parallel, with their descriptors queued for the next checkpoint.
++            std::unique_lock lock(archiveMutex);
++            if (!archive || !collecting.load(std::memory_order_acquire)) return;
++            std::deque<PendingDescriptor> batch;
++            {
++                std::lock_guard queueLock(pendingMutex);
++                pending.swap(batch);
++                pendingCount = 0;
++            }
++            increment(checkpoints);
++            if (!batch.empty()) log("checkpoint_harvest_begin");
++            const auto harvestStart = Clock::now();
++            harvestInFlight.store(batch.size(), std::memory_order_relaxed);
++            while (!batch.empty()) {
++                // A native Metal call cannot be interrupted; the budget is
++                // checked between calls and leftovers remain queued truthfully.
++                if (elapsed(harvestStart) >= pipeline_cache::HarvestBudgetNanoseconds) {
++                    increment(harvestBudgetYields);
++                    break;
++                }
++                // Latest stage variants take priority over startup backlog.
++                auto& descriptor = batch.back();
++                NS::Error* error = nullptr;
++                const bool success = descriptor.render
++                    ? archive->addRenderPipelineFunctions(descriptor.render, &error)
++                    : archive->addComputePipelineFunctions(descriptor.compute, &error);
++                if (success) { increment(harvested); dirty = true; }
++                else {
++                    increment(harvestErrors);
++                    if (harvestErrors.load(std::memory_order_relaxed) <= 4) log("harvest_failed_fallback", error);
++                }
++                batch.pop_back();
++                harvestInFlight.store(batch.size(), std::memory_order_relaxed);
++            }
++            increment(harvestNs, elapsed(harvestStart));
++            if (!batch.empty()) {
++                std::lock_guard queueLock(pendingMutex);
++                // batch is the older remainder; pending holds newer arrivals.
++                while (!pending.empty()) {
++                    batch.emplace_back(std::move(pending.front()));
++                    pending.pop_front();
++                    if (batch.size() > pipeline_cache::MaxPendingDescriptors) {
++                        batch.pop_front();
++                        increment(dropped);
++                    }
++                }
++                pending.swap(batch);
++                pendingCount.store(pending.size(), std::memory_order_relaxed);
++            }
++            harvestInFlight = 0;
++            if (!dirty) return;
++
++            // Same-directory unique temporary + POSIX rename preserves the old
++            // mapped archive until a complete new file is ready. No frame IO.
++            const auto temporary = std::filesystem::path(file.string() + "." +
++                std::to_string(NS::ProcessInfo::processInfo()->processIdentifier()) + "." +
++                std::to_string(Clock::now().time_since_epoch().count()) + ".tmp");
++            NS::Error* error = nullptr;
++            const auto serializeStart = Clock::now();
++            bool success = archive->serializeToURL(url(temporary), &error);
++            increment(serializeNs, elapsed(serializeStart));
++            std::error_code ec;
++            const uint64_t bytes = success ? std::filesystem::file_size(temporary, ec) : 0;
++            success = success && !ec && pipeline_cache::ValidArchiveSize(bytes);
++            if (success) success = std::rename(temporary.c_str(), file.c_str()) == 0;
++            if (success) {
++                increment(saves);
++                archiveBytes = bytes;
++                dirty = false;
++                status = "saved";
++                log("checkpoint_saved");
++            } else {
++                increment(saveErrors);
++                status = "save_failed_read_only";
++                log("checkpoint_save_failed", error);
++                // Do not keep growing a dirty archive after full disk, oversize,
++                // or an unwritable directory. Cached lookups and normal shader
++                // compilation remain usable; persistence retries on next launch.
++                collecting.store(false, std::memory_order_release);
++                {
++                    std::lock_guard queueLock(pendingMutex);
++                    increment(dropped, pending.size());
++                    pending.clear();
++                    pendingCount = 0;
++                }
++                // Only this manager's exact temporary file, never game data.
++                std::filesystem::remove(temporary, ec);
++            }
++        }
++
++        std::string snapshot() const {
++            const auto read = [](const std::atomic<uint64_t>& value) { return static_cast<unsigned long long>(value.load(std::memory_order_relaxed)); };
++            char buffer[2048];
++            std::snprintf(buffer, sizeof(buffer),
++                "IOS-SHADER-ARCHIVE v1 enabled=%u collecting=%u status=%s key=%s loads=%llu load_errors=%llu hits=%llu misses_or_errors=%llu fallback_compiles=%llu fallback_failures=%llu queued=%llu pending=%llu dropped=%llu harvested=%llu harvest_errors=%llu saves=%llu save_errors=%llu archive_bytes=%llu checkpoints=%llu lookup_ns=%llu fallback_ns=%llu harvest_ns=%llu serialize_ns=%llu pending_limit=%llu archive_limit=%llu harvest_inflight=%llu harvest_budget_yields=%llu",
++                unsigned(enabled.load(std::memory_order_acquire)), unsigned(collecting.load(std::memory_order_acquire)), status.load(std::memory_order_relaxed), key.c_str(),
++                read(loads), read(loadErrors), read(hits), read(missesOrErrors), read(fallbackCompiles), read(fallbackFailures),
++                read(queued), read(pendingCount), read(dropped), read(harvested), read(harvestErrors), read(saves), read(saveErrors),
++                read(archiveBytes), read(checkpoints), read(lookupNs), read(fallbackNs), read(harvestNs), read(serializeNs),
++                static_cast<unsigned long long>(pipeline_cache::MaxPendingDescriptors), static_cast<unsigned long long>(pipeline_cache::MaxArchiveBytes),
++                read(harvestInFlight), read(harvestBudgetYields));
++            return buffer;
++        }
++    };
++
+     // MARK: - Constants
+ 
+     static constexpr size_t MAX_DRAWABLES = 3;
+@@ -43,6 +379,33 @@ namespace plume {
          return (n + alignment - 1) & ~(alignment - 1);
      }
  
@@ -4482,7 +5225,50 @@ index 2abe67c..1478240 100644
      uint64_t createClearPipelineKey(MTL::RenderPipelineDescriptor *pipelineDesc, bool depthWriteEnabled, bool stencilWriteEnabled) {
          auto colorFormat = [&](uint32_t index) {
              if (auto colorAttachment = pipelineDesc->colorAttachments()->object(index)) {
-@@ -1619,6 +1648,14 @@ namespace plume {
+@@ -967,24 +1330,6 @@ namespace plume {
+         }
+     }
+ 
+-    // This structure should be used to wrap any public APIs, constructors or
+-    // destructors in an autorelease pool. Autorelease pools should never be
+-    // initialized or released without using this structure. The structure
+-    // should be declared as early as possible into the function. The structure
+-    // can be omitted if the function makes no use of any Metal functions.
+-
+-    struct MetalAutoreleasePool {
+-        void *pool = nullptr;
+-
+-        MetalAutoreleasePool() {
+-            pool = objc_autoreleasePoolPush();
+-        }
+-
+-        ~MetalAutoreleasePool() {
+-            objc_autoreleasePoolPop(pool);
+-        }
+-    };
+-
+     // MARK: - Helper Structures
+ 
+     MetalDescriptorSetLayout::MetalDescriptorSetLayout(MetalDevice *device, const RenderDescriptorSetDesc &desc) {
+@@ -1456,7 +1801,7 @@ namespace plume {
+ 
+         // State variables, initialized here to be reused in encoder re-binding
+         NS::Error *error = nullptr;
+-        state.pipelineState = device->mtl->newComputePipelineState(descriptor, MTL::PipelineOptionNone, nullptr, &error);
++        state.pipelineState = device->createCachedComputePipeline(descriptor, &error);
+         state.threadGroupSizeX = desc.threadGroupSizeX;
+         state.threadGroupSizeY = desc.threadGroupSizeY;
+         state.threadGroupSizeZ = desc.threadGroupSizeZ;
+@@ -1604,7 +1949,7 @@ namespace plume {
+         state.cullMode = mapCullMode(desc.cullMode);
+         state.depthClipMode = (desc.depthClipEnabled) ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp;
+         state.winding = mapFrontFace(desc.frontFace);
+-        state.renderPipelineState = device->mtl->newRenderPipelineState(descriptor, &error);
++        state.renderPipelineState = device->createCachedRenderPipeline(descriptor, &error);
+         state.primitiveType = mapPrimitiveType(desc.primitiveTopology);
+         state.stencilReference = desc.stencilEnabled ? desc.stencilReference : 0;
+ 
+@@ -1619,6 +1964,14 @@ namespace plume {
  
          if (error != nullptr) {
              fprintf(stderr, "MTLDevice newRenderPipelineState: failed with error %s.\n", error->localizedDescription()->utf8String());
@@ -4497,7 +5283,7 @@ index 2abe67c..1478240 100644
              return;
          }
  
-@@ -1974,6 +2011,8 @@ namespace plume {
+@@ -1974,6 +2327,8 @@ namespace plume {
              lastPresentedIdCondVar.notify_all();
          });
  
@@ -4506,7 +5292,7 @@ index 2abe67c..1478240 100644
          presentBuffer->commit();
  
          return true;
-@@ -2055,6 +2094,8 @@ namespace plume {
+@@ -2055,6 +2410,8 @@ namespace plume {
          const MetalCommandSemaphore *interfaceSemaphore = static_cast<MetalCommandSemaphore *>(signalSemaphore);
          acquireBuffer->enqueue();
          acquireBuffer->encodeSignalEvent(interfaceSemaphore->mtl, interfaceSemaphore->mtlEventValue);
@@ -4515,7 +5301,7 @@ index 2abe67c..1478240 100644
          acquireBuffer->commit();
  
          CA::MetalDrawable *nextDrawable = layer->nextDrawable();
-@@ -2243,6 +2284,9 @@ namespace plume {
+@@ -2243,6 +2600,9 @@ namespace plume {
      MetalCommandList::~MetalCommandList() {
          MetalAutoreleasePool releasePool;
  
@@ -4525,7 +5311,7 @@ index 2abe67c..1478240 100644
          if (mtl != nullptr) {
              mtl->release();
          }
-@@ -2258,6 +2302,7 @@ namespace plume {
+@@ -2258,6 +2618,7 @@ namespace plume {
  
      void MetalCommandList::begin() {
          assert(mtl == nullptr);
@@ -4533,7 +5319,7 @@ index 2abe67c..1478240 100644
  
          MetalAutoreleasePool releasePool;
          startedEncoding = false;
-@@ -2293,6 +2338,17 @@ namespace plume {
+@@ -2293,6 +2654,17 @@ namespace plume {
      }
  
      void MetalCommandList::commit() {
@@ -4551,7 +5337,7 @@ index 2abe67c..1478240 100644
          mtl->commit();
          mtl->release();
          mtl = nullptr;
-@@ -2782,6 +2838,7 @@ namespace plume {
+@@ -2782,6 +3154,7 @@ namespace plume {
          // For full framebuffer clears, use the more efficient load action clear
          MetalAutoreleasePool releasePool;
          if (clearRectsCount == 0) {
@@ -4559,7 +5345,7 @@ index 2abe67c..1478240 100644
              pendingClears.initialAction[attachmentIndex] = MTL::LoadActionClear;
              pendingClears.clearValues[attachmentIndex].color = colorValue;
              pendingClears.active = true;
-@@ -2789,6 +2846,7 @@ namespace plume {
+@@ -2789,6 +3162,7 @@ namespace plume {
          }
  
          // For partial clears, do our own quad-based clear
@@ -4567,7 +5353,7 @@ index 2abe67c..1478240 100644
          checkActiveRenderEncoder();
  
          // Store state cache
-@@ -2808,16 +2866,21 @@ namespace plume {
+@@ -2808,16 +3182,21 @@ namespace plume {
  
          // Set pixel format for depth attachment if we have one, with write disabled
          if (targetFramebuffer->depthAttachment.format != RenderFormat::UNKNOWN) {
@@ -4595,7 +5381,7 @@ index 2abe67c..1478240 100644
          }
  
          const MTL::RenderPipelineState *pipelineState = device->getOrCreateClearRenderPipelineState(pipelineDesc);
-@@ -2872,6 +2935,7 @@ namespace plume {
+@@ -2872,6 +3251,7 @@ namespace plume {
          if (clearDepth || clearStencil) {
              // For full framebuffer clears, use the more efficient load action clear
              if (clearRectsCount == 0) {
@@ -4603,7 +5389,7 @@ index 2abe67c..1478240 100644
                  const size_t depthIndex = targetFramebuffer->colorAttachments.size();
  
                  if (clearDepth) {
-@@ -2889,6 +2953,7 @@ namespace plume {
+@@ -2889,6 +3269,7 @@ namespace plume {
              }
  
              // For partial clears, do our own quad-based clear
@@ -4611,7 +5397,7 @@ index 2abe67c..1478240 100644
              checkActiveRenderEncoder();
  
              // Store state cache
-@@ -3108,6 +3173,7 @@ namespace plume {
+@@ -3108,6 +3489,7 @@ namespace plume {
          colorAttachment->setStoreAction(MTL::StoreActionMultisampleResolve);
  
          MTL::RenderCommandEncoder *encoder = mtl->renderCommandEncoder(renderPassDescriptor);
@@ -4619,7 +5405,7 @@ index 2abe67c..1478240 100644
          encoder->setLabel(MTLSTR("Resolve Texture Encoder"));
          encoder->endEncoding();
      }
-@@ -3374,6 +3440,7 @@ namespace plume {
+@@ -3374,6 +3756,7 @@ namespace plume {
              }
  
              activeRenderEncoder = mtl->renderCommandEncoder(renderDescriptor);
@@ -4627,7 +5413,7 @@ index 2abe67c..1478240 100644
              activeRenderEncoder->setLabel(MTLSTR("Graphics Render Encoder"));
  
              barrierWait(MetalBarrierStage::GRAPHICS, activeRenderEncoder);
-@@ -3695,6 +3762,8 @@ namespace plume {
+@@ -3695,6 +4078,8 @@ namespace plume {
              cmdBuffer->encodeWait(interfaceSemaphore->mtl, interfaceSemaphore->mtlEventValue++);
          }
  
@@ -4636,7 +5422,7 @@ index 2abe67c..1478240 100644
          cmdBuffer->commit();
  
          // Commit all command lists except the last one
-@@ -3796,7 +3865,14 @@ namespace plume {
+@@ -3796,7 +4181,14 @@ namespace plume {
  
          const std::string deviceName(mtl->name()->utf8String());
          description.name = deviceName;
@@ -4651,7 +5437,15 @@ index 2abe67c..1478240 100644
          description.driverVersion = 1; // Unavailable
          description.vendor = mtl->supportsFamily(MTL::GPUFamilyApple1) ? RenderDeviceVendor::APPLE : getRenderDeviceVendor(mtl->registryID());
          description.dedicatedVideoMemory = mtl->recommendedMaxWorkingSetSize();
-@@ -3868,6 +3944,10 @@ namespace plume {
+@@ -3856,6 +4248,7 @@ namespace plume {
+ 
+     MetalDevice::~MetalDevice() {
+         MetalAutoreleasePool releasePool;
++        pipelineArchive.reset();
+         if (timestampCounterSet != nullptr) {
+             timestampCounterSet->release();
+         }
+@@ -3868,6 +4261,10 @@ namespace plume {
          clearVertexFunction->release();
          clearColorFunction->release();
          clearDepthFunction->release();
@@ -4662,7 +5456,35 @@ index 2abe67c..1478240 100644
          sharedBlitDescriptor->release();
  
          if (residencySet != nullptr) {
-@@ -4109,6 +4189,12 @@ namespace plume {
+@@ -3878,6 +4275,27 @@ namespace plume {
+         mtl->release();
+     }
+ 
++    void MetalDevice::configurePipelineCache(const std::string& directory, const std::string& namespaceKey) {
++        // Configure once on the host thread before application shader creation.
++        if (!pipelineArchive) pipelineArchive = std::make_unique<MetalPipelineArchive>(mtl, directory, namespaceKey);
++    }
++
++    void MetalDevice::checkpointPipelineCache() {
++        if (pipelineArchive) pipelineArchive->checkpoint();
++    }
++
++    std::string MetalDevice::getPipelineCacheStatus() const {
++        return pipelineArchive ? pipelineArchive->snapshot() : "IOS-SHADER-ARCHIVE v1 enabled=0 status=unconfigured";
++    }
++
++    MTL::RenderPipelineState* MetalDevice::createCachedRenderPipeline(MTL::RenderPipelineDescriptor* descriptor, NS::Error** error) const {
++        return pipelineArchive ? pipelineArchive->create(descriptor, error) : mtl->newRenderPipelineState(descriptor, error);
++    }
++
++    MTL::ComputePipelineState* MetalDevice::createCachedComputePipeline(MTL::ComputePipelineDescriptor* descriptor, NS::Error** error) const {
++        return pipelineArchive ? pipelineArchive->create(descriptor, error) : mtl->newComputePipelineState(descriptor, MTL::PipelineOptionNone, nullptr, error);
++    }
++
+     std::unique_ptr<RenderDescriptorSet> MetalDevice::createDescriptorSet(const RenderDescriptorSetDesc &desc) {
+         return std::make_unique<MetalDescriptorSet>(this, desc);
+     }
+@@ -4109,6 +4527,12 @@ namespace plume {
          clearColorFunction = clearShaderLibrary->newFunction(MTLSTR("clearColorFrag"));
          clearDepthFunction = clearShaderLibrary->newFunction(MTLSTR("clearDepthFrag"));
  
@@ -4675,7 +5497,7 @@ index 2abe67c..1478240 100644
          // Create depth stencil clear states
          MTL::StencilDescriptor *stencilDescriptor = MTL::StencilDescriptor::alloc()->init();
          stencilDescriptor->setDepthStencilPassOperation(MTL::StencilOperationReplace);
-@@ -4160,7 +4246,9 @@ namespace plume {
+@@ -4160,7 +4584,9 @@ namespace plume {
              std::lock_guard lock(resourcesMutex);
              if (residencySet != nullptr) {
                  residencySet->addAllocation(resource);
@@ -4685,7 +5507,7 @@ index 2abe67c..1478240 100644
              }
              if (addressable) {
                  gpuAddressableResources.push_back(resource);
-@@ -4173,7 +4261,9 @@ namespace plume {
+@@ -4173,7 +4599,9 @@ namespace plume {
              std::lock_guard lock(resourcesMutex);
              if (residencySet != nullptr) {
                  residencySet->removeAllocation(resource);
@@ -4696,10 +5518,18 @@ index 2abe67c..1478240 100644
              if (addressable) {
                  const auto it = std::find(gpuAddressableResources.begin(), gpuAddressableResources.end(), resource);
 diff --git a/thirdparty/plume/plume_metal.h b/thirdparty/plume/plume_metal.h
-index 59ae129..66da6bf 100644
+index 59ae129..de046b0 100644
 --- a/thirdparty/plume/plume_metal.h
 +++ b/thirdparty/plume/plume_metal.h
-@@ -350,6 +350,9 @@ namespace plume {
+@@ -47,6 +47,7 @@ namespace plume {
+ 
+     struct MetalInterface;
+     struct MetalDevice;
++    struct MetalPipelineArchive;
+     struct MetalCommandQueue;
+     struct MetalTexture;
+     struct MetalTextureView;
+@@ -350,6 +351,9 @@ namespace plume {
          };
  
          MTL::CommandBuffer *mtl = nullptr;
@@ -4709,7 +5539,7 @@ index 59ae129..66da6bf 100644
          EncoderType activeType = EncoderType::None;
          bool startedEncoding = false;
          MTL::RenderCommandEncoder *activeRenderEncoder = nullptr;
-@@ -711,6 +714,7 @@ namespace plume {
+@@ -711,6 +715,7 @@ namespace plume {
          MTL::DepthStencilState *clearDepthState;
          MTL::DepthStencilState *clearStencilState;
          MTL::DepthStencilState *clearDepthStencilState;
@@ -4717,6 +5547,38 @@ index 59ae129..66da6bf 100644
  
          std::mutex clearPipelineStateMutex;
          std::unordered_map<uint64_t, MTL::RenderPipelineState *> clearRenderPipelineStates;
+@@ -728,9 +733,15 @@ namespace plume {
+ 
+         // Counter sets for query pools
+         MTL::CounterSet* timestampCounterSet = nullptr;
++        std::unique_ptr<MetalPipelineArchive> pipelineArchive;
+ 
+         explicit MetalDevice(MetalInterface *renderInterface, const std::string &preferredDeviceName);
+         ~MetalDevice() override;
++        void configurePipelineCache(const std::string& directory, const std::string& namespaceKey) override;
++        void checkpointPipelineCache() override;
++        std::string getPipelineCacheStatus() const override;
++        MTL::RenderPipelineState* createCachedRenderPipeline(MTL::RenderPipelineDescriptor* descriptor, NS::Error** error) const;
++        MTL::ComputePipelineState* createCachedComputePipeline(MTL::ComputePipelineDescriptor* descriptor, NS::Error** error) const;
+         std::unique_ptr<RenderDescriptorSet> createDescriptorSet(const RenderDescriptorSetDesc &desc) override;
+         std::unique_ptr<RenderShader> createShader(const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format) override;
+         std::unique_ptr<RenderSampler> createSampler(const RenderSamplerDesc &desc) override;
+diff --git a/thirdparty/plume/plume_render_interface.h b/thirdparty/plume/plume_render_interface.h
+index 2048557..aaf7214 100644
+--- a/thirdparty/plume/plume_render_interface.h
++++ b/thirdparty/plume/plume_render_interface.h
+@@ -225,6 +225,11 @@ namespace plume {
+ 
+     struct RenderDevice {
+         virtual ~RenderDevice() { }
++        // Optional persistent backend cache. Configure once before application
++        // pipelines; checkpoint only at an explicit non-gameplay safe boundary.
++        virtual void configurePipelineCache(const std::string&, const std::string&) { }
++        virtual void checkpointPipelineCache() { }
++        virtual std::string getPipelineCacheStatus() const { return {}; }
+         virtual std::unique_ptr<RenderDescriptorSet> createDescriptorSet(const RenderDescriptorSetDesc &desc) = 0;
+         virtual std::unique_ptr<RenderShader> createShader(const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format) = 0;
+         virtual std::unique_ptr<RenderSampler> createSampler(const RenderSamplerDesc &desc) = 0;
 diff --git a/tools/XenosRecomp/XenosRecomp/CMakeLists.txt b/tools/XenosRecomp/XenosRecomp/CMakeLists.txt
 index b187f59..d516a1e 100644
 --- a/tools/XenosRecomp/XenosRecomp/CMakeLists.txt

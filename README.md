@@ -1,5 +1,12 @@
 # Sonic Unleashed Recompiled iOS — Day-Stage Arcade
 
+Current candidate: [1.0.16 shader warmup and Mazuri Act 5 dependency repair](arcade/shader-warmup.md).
+The accepted 1.0.14 Arcade and 1.0.15 Performance Lab IPAs remain preserved
+locally. The candidate still requires native build and device verification;
+older diagnostic notes below are historical, not the current feature status.
+Only an explicitly verified full local IPA is ready for Sideloadly; never
+install the code-only Actions intermediate.
+
 This private repository builds a slim, self-contained iOS edition of Sonic
 Unleashed Recompiled from the owner's Xbox 360 dump, title update, DLC, and
 save data. The final deliverable is one unsigned `.ipa` that Sideloadly can

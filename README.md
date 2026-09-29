@@ -1,6 +1,6 @@
 # Sonic Unleashed Recompiled iOS — Day-Stage Arcade
 
-This private repository builds a slim, self-contained iOS edition of Sonic
+This repository builds a slim, self-contained iOS edition of Sonic
 Unleashed Recompiled from the owner's Xbox 360 dump, title update, DLC, and
 save data. The final deliverable is one unsigned `.ipa` that Sideloadly can
 re-sign and install.
@@ -8,53 +8,49 @@ re-sign and install.
 The source is pinned to
 [`Markos-Th09/UnleashedRecomp`](https://github.com/Markos-Th09/UnleashedRecomp)
 commit `5d5adbc7e6953990be3184e8614787d93940b713` on its `ios` branch.
+The working IPA uses this project's exact [tested source snapshot](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/tree/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e); the default branch is not the build provenance.
 
-## Download
+## Current working build — 1.0.16
 
-**Runtime testing is incomplete.** The owner confirmed that 1.0.5 DataFix1
-passes the loading screen and loads day stages. Apotos Act 1 has transparent
-scenery, Eggmanland fails to load, and the original menu remains visible.
-Version 1.0.6 is being built with a two-choice arcade menu, direct country
-browsing, corrected file enumeration sizes, and Eggmanland dependencies.
-Its full data package will bake XML edits into verified copies of the archives.
-These changes still require device testing; the Apotos rendering issue is open.
-Never install a `compiled-ios-*` release: those are code-only intermediates.
+[Download the full working IPA](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/download/v1.0.16-working/Sonic-Unleashed-1.0.16-Shader-Warmup-B24.ipa)
+· [Release notes and checksum](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/v1.0.16-working)
 
-Older diagnostic IPA (does not contain the DataFix1 archive repair):
-[`ios-loading-diagnostics-1.0.5`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/ios-loading-diagnostics-1.0.5)
+The owner reported this installed build working and accepted it as the current
+baseline on **September 29, 2026**. Development is paused here for now. This is
+the exact tested IPA, not a rebuild or a newly repackaged copy. Previous builds
+remain available.
 
-- File: `Sonic-Unleashed-1.0.5-Diagnostics.ipa`
-- Size: `1,752,853,606` bytes (1.632 GiB)
-- SHA-256: `55516d3a4be494acfcdcd31109ea8979d1737b4a2b7f68ee3095a235cbff82f7`
+- File: `Sonic-Unleashed-1.0.16-Shader-Warmup-B24.ipa`
+- Version / numeric build: `1.0.16` / `1.24.1`
+- Size: `1,773,524,104` bytes
+- SHA-256: `f398aeb5a05984468c7850898965068dfa058ca12f12ce5af3c8ff725c029c11`
+- Source: [`b41f1e64a38244e923d42c0c179cb5bdf09a0b0e`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/tree/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e)
+- Native build: [Actions run 24](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/actions/runs/36276171066)
 
-Use the specifically identified full IPA for each device test. Code-only
-builds and older diagnostic packages are not substitutes for the full package.
+The full package contains the game, update, DLC, bundled save, arcade changes,
+touch controls, shader-warmup implementation and Mazuri Act 5 dependency repair.
+Its 1,462 bundled data files passed hash and CRC checks; the standard ZIP,
+iPhone metadata and executable were verified. GitHub's uploaded asset digest
+matches the exact local IPA.
 
-Install over the existing app rather than deleting it. This diagnostic build
-saves `Sonic-Unleashed-diagnostic.log` and `Sonic-Unleashed-stderr.log` in the
-app's Documents directory so the loading blocker can be investigated without
-relying on iOS's lossy live logging. It preserves the same game data and
-arcade patches as 1.0.4 and does not claim to fix the loading blocker itself.
+**Not every stage has been tested.** Owner acceptance does not establish
+comprehensive device validation or a measured sustained-FPS improvement.
+First-use shader compilation can still occur. See the
+[1.0.16 implementation notes](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/blob/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e/arcade/shader-warmup.md)
+for details; pre-release testing status in those historical notes predates
+this acceptance.
 
-The iOS bundle, executable, and Home Screen label are all named `Sonic
-Unleashed`. The package includes the project's Sonic artwork in every required
-iPhone and iPad app-icon size. Its Metal startup path classifies the iPhone GPU
-as integrated without calling the macOS-only `MTLDevice.location` selector that
-caused the earlier build to abort immediately after launch.
-
-The iOS runtime uses a native fullscreen launch configuration and keeps the
-UIKit/SDL event pump on the main thread while the recompiled game runs on a
-worker. Background/resume handling is implemented but still needs device
-validation once the loading blocker is resolved. The intended behavior is to
-continue a resident app and cold-start one evicted from memory.
+Use Sideloadly to install the full IPA over the existing app **without deleting
+the app**, preserving its current saves and settings. Do not install a
+`compiled-ios-*` release: those are code-only build intermediates.
 
 ## Arcade edition
 
-- Keeps the Sonic Unleashed title screen. Pressing Start continues directly
-  to the stage selector; story, towns, and the world map are bypassed.
-- Uses a country-first selector: left/right changes country and up/down changes
-  act. Start/Options opens the Recompiled options menu.
-- Includes 48 verified daytime stages across Apotos, Mazuri, Spagonia,
+- Keeps the title screen with Continue and Options. Continue opens the day-stage
+  selector over the retained globe and stars; story and towns are bypassed.
+- L1/R1 changes country and up/down changes act. Options are available from the
+  title menu, not the stage selector or in-stage pause menu.
+- Includes 48 catalogued daytime stages across Apotos, Mazuri, Spagonia,
   Chun-Nan, Adabat, Holoska, Shamar, Empire City, and Eggmanland.
 - Renames the harder DLC variants to `Act N (Hard)` and removes the `[DLC]`
   label.
@@ -64,11 +60,13 @@ continue a resident app and cold-start one evicted from memory.
 - Removes medal and media-collectible layers from the retained stages, hides
   the lives and EXP HUD elements, zeroes enemy EXP rewards, and starts Sonic's
   daytime stats at their maximum values.
-- Keeps lives at 99 and preserves the complete score through deaths.
+- Preserves score through deaths; an intentional Restart resets the score.
+  Restart is available in stages, not in the stage selector. The lives icon
+  and one-up rewards are removed. Max stats do not mean infinite boost.
 - Uses the selector's direct stage flow, so Next after the normal rank screen
   returns to stage select without medal or EXP result pages.
 
-The authoritative catalog is [`arcade/stages.json`](arcade/stages.json):
+The [catalog for this build](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/blob/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e/arcade/stages.json) contains:
 
 | Country | Acts |
 | --- | ---: |
@@ -109,8 +107,9 @@ verification.
 `tools/prepare_arcade_data.py` instead creates a non-destructive reduced data
 tree containing the title assets, all 48 selected stages and their required
 dependencies, required menu/stage audio, the update, patched executable, save,
-and arcade overlay. The current prepared tree is 1,746,641,792 uncompressed
-bytes across 1,377 files. `tools/inject_userdata_into_ipa.py` refuses ZIP64,
+and arcade overlay. The 1.0.16 prepared tree is 1,914,326,970 uncompressed
+bytes across 1,462 files. All 1,460 accepted 1.0.14 baseline files are unchanged;
+only the two missing BossCommon archive files were added. `tools/inject_userdata_into_ipa.py` refuses ZIP64,
 validates the app bundle, iPhone platform metadata, and executable, hashes
 every injected file, and tests the completed standard ZIP.
 
@@ -121,11 +120,13 @@ The GitHub Actions workflow compiles the arm64 iPhone executable on a hosted
 and `codesign`; Sideloadly signs an existing app but cannot replace those
 compile-time tools.
 
-The hosted runner downloads only the three private recompiler inputs from the
-private `private-build-inputs-v1` release. Full game and save data stay on the
-owner's PC until the local injection step.
+The hosted runner builds the code-only intermediate. Full game and save data
+are injected and verified locally before an explicitly approved full release
+is uploaded. The 1.0.16 working IPA was published unchanged after owner acceptance.
 
-The reproducible local sequence is:
+The general local packaging sequence below is historical guidance, not a reason
+to rebuild the accepted IPA. Use the pinned source snapshot and 1.0.16 notes
+for its exact provenance:
 
 ```powershell
 python .\tools\build_arcade_mod.py `
@@ -147,8 +148,9 @@ python .\tools\inject_userdata_into_ipa.py `
   --output ".\Sonic-Unleashed.ipa"
 ```
 
-## Private data policy
+## Release visibility
 
-Game files, save data, and completed IPAs are not committed to Git. The private
-build inputs and final self-contained IPA are release assets in this private
-repository. Keep the repository and releases private.
+This repository and its releases are public. The owner explicitly requested
+publication of the full working IPA, including its bundled game and save data.
+The IPA is a release asset, not a file committed to Git. Its original build
+provenance metadata is preserved, including local source-folder paths.

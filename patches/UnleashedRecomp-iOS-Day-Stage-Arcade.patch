@@ -1,5 +1,5 @@
 diff --git a/UnleashedRecomp/CMakeLists.txt b/UnleashedRecomp/CMakeLists.txt
-index 6f3a2e7..875d6b7 100644
+index 6f3a2e7..0b29a11 100644
 --- a/UnleashedRecomp/CMakeLists.txt
 +++ b/UnleashedRecomp/CMakeLists.txt
 @@ -1,5 +1,11 @@
@@ -30,15 +30,7 @@ index 6f3a2e7..875d6b7 100644
      "ui/button_guide.cpp"
      "ui/fader.cpp"
      "ui/game_window.cpp"
-@@ -187,6 +195,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
-     "ui/message_window.cpp"
-     "ui/options_menu.cpp"
-     "ui/options_menu_thumbnails.cpp"
-+    "ui/touch_controls.cpp"
-     "ui/tv_static.cpp"
- )
- 
-@@ -332,15 +341,18 @@ elseif(APPLE)
+@@ -332,15 +340,18 @@ elseif(APPLE)
          OUTPUT_VAR MACOS_BUNDLE_VERSION
      )
  
@@ -60,7 +52,7 @@ index 6f3a2e7..875d6b7 100644
              MACOSX_BUNDLE_BUNDLE_VERSION ${IOS_BUNDLE_VERSION}
              MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
              XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-@@ -485,10 +497,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
+@@ -485,10 +496,22 @@ set(UNLEASHED_RECOMP_LINK_LIBS
  )
  
  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -199,16 +191,10 @@ index e2ec228..335e530 100644
    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                         NSUserDomainMask, YES);
 diff --git a/UnleashedRecomp/gpu/video.cpp b/UnleashedRecomp/gpu/video.cpp
-index 0205276..aa6c6f3 100644
+index 0205276..3d952a4 100644
 --- a/UnleashedRecomp/gpu/video.cpp
 +++ b/UnleashedRecomp/gpu/video.cpp
-@@ -28,11 +28,23 @@
- #include <ui/options_menu.h>
- #include <ui/game_window.h>
- #include <ui/black_bar.h>
-+#include <ui/touch_controls.h>
- #include <patches/aspect_ratio_patches.h>
- #include <user/config.h>
+@@ -33,6 +33,17 @@
  #include <sdl_listener.h>
  #include <xxHashMap.h>
  #include <os/process.h>
@@ -226,7 +212,7 @@ index 0205276..aa6c6f3 100644
  
  #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
  #include <magic_enum/magic_enum.hpp>
-@@ -430,6 +442,51 @@ static Mutex g_pipelineCacheMutex;
+@@ -430,6 +441,51 @@ static Mutex g_pipelineCacheMutex;
  static std::atomic<uint32_t> g_compilingPipelineTaskCount;
  static std::atomic<uint32_t> g_pendingPipelineTaskCount;
  
@@ -278,7 +264,7 @@ index 0205276..aa6c6f3 100644
  enum class PipelineTaskType
  {
      Null,
-@@ -449,6 +506,9 @@ static std::vector<PipelineTask> g_pipelineTaskQueue;
+@@ -449,6 +505,9 @@ static std::vector<PipelineTask> g_pipelineTaskQueue;
  
  static void EnqueuePipelineTask(PipelineTaskType type, const boost::shared_ptr<Hedgehog::Database::CDatabaseData>& databaseData)
  {
@@ -288,7 +274,7 @@ index 0205276..aa6c6f3 100644
      // Precompiled pipelines deliberately do not increment
      // this counter to overlap the compilation with intro logos.
      if (type != PipelineTaskType::PrecompilePipelines)
-@@ -461,6 +521,9 @@ static void EnqueuePipelineTask(PipelineTaskType type, const boost::shared_ptr<H
+@@ -461,6 +520,9 @@ static void EnqueuePipelineTask(PipelineTaskType type, const boost::shared_ptr<H
  
      if ((++g_pendingPipelineTaskCount) == 1)
          g_pendingPipelineTaskCount.notify_one();
@@ -298,7 +284,7 @@ index 0205276..aa6c6f3 100644
  }
  
  static const PipelineState g_pipelineStateCache[] =
-@@ -766,6 +829,7 @@ static void DestructTempResources()
+@@ -766,6 +828,7 @@ static void DestructTempResources()
  static std::thread::id g_presentThreadId = std::this_thread::get_id();
  static std::atomic<bool> g_readyForCommands;
  static std::atomic<bool> g_appSuspended = false;
@@ -306,7 +292,7 @@ index 0205276..aa6c6f3 100644
  
  PPC_FUNC_IMPL(__imp__sub_824ECA00);
  PPC_FUNC(sub_824ECA00)
-@@ -982,6 +1046,9 @@ struct RenderCommand
+@@ -982,6 +1045,9 @@ struct RenderCommand
          {
              XXH64_hash_t hash;
              RenderPipeline* pipeline;
@@ -316,15 +302,7 @@ index 0205276..aa6c6f3 100644
          } addPipeline;
  
          struct
-@@ -1428,6 +1495,7 @@ static void CreateImGuiBackend()
-     MessageWindow::Init();
-     OptionsMenu::Init();
-     InstallerWizard::Init();
-+    TouchControls::Init();
- 
-     ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
- 
-@@ -1848,6 +1916,13 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
+@@ -1848,6 +1914,13 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
          return false;
      }
  
@@ -338,7 +316,7 @@ index 0205276..aa6c6f3 100644
  #ifdef UNLEASHED_RECOMP_D3D12
      if (graphicsApiRetry)
      {
-@@ -2613,6 +2688,7 @@ static void DrawFPS()
+@@ -2613,6 +2686,7 @@ static void DrawFPS()
      drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
  }
  
@@ -346,7 +324,7 @@ index 0205276..aa6c6f3 100644
  static void DrawImGui()
  {
      ImGui_ImplSDL2_NewFrame();
-@@ -2668,6 +2744,7 @@ static void DrawImGui()
+@@ -2668,6 +2742,7 @@ static void DrawImGui()
      ImGui::End();
  #endif
  
@@ -354,16 +332,7 @@ index 0205276..aa6c6f3 100644
      AchievementMenu::Draw();
      OptionsMenu::Draw();
      AchievementOverlay::Draw();
-@@ -2676,6 +2753,8 @@ static void DrawImGui()
-     ButtonGuide::Draw();
-     Fader::Draw();
-     BlackBar::Draw();
-+    TouchControls::SetActive(App::s_isInit && !InstallerWizard::s_isVisible);
-+    TouchControls::Draw();
- 
-     assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
- 
-@@ -2849,19 +2928,13 @@ static bool g_pendingWaitOnSwapChain = true;
+@@ -2849,19 +2924,13 @@ static bool g_pendingWaitOnSwapChain = true;
  
  void Video::HandleApplicationBackgroundState(bool isBackgrounded)
  {
@@ -390,7 +359,7 @@ index 0205276..aa6c6f3 100644
  }
  
  void Video::WaitOnSwapChain()
-@@ -2882,8 +2955,58 @@ void Video::WaitOnSwapChain()
+@@ -2882,8 +2951,58 @@ void Video::WaitOnSwapChain()
  static bool g_shouldPrecompilePipelines;
  static std::atomic<bool> g_executedCommandList;
  
@@ -449,7 +418,7 @@ index 0205276..aa6c6f3 100644
      g_readyForCommands = false;
  
      RenderCommand cmd;
-@@ -2905,6 +3028,17 @@ void Video::Present()
+@@ -2905,6 +3024,17 @@ void Video::Present()
      g_executedCommandList.wait(false);
      g_executedCommandList = false;
  
@@ -467,7 +436,7 @@ index 0205276..aa6c6f3 100644
      if (g_swapChainValid)
      {
          if (g_pendingWaitOnSwapChain)
-@@ -2957,10 +3091,29 @@ void Video::Present()
+@@ -2957,10 +3087,29 @@ void Video::Present()
  
          if (now < s_next)
          {
@@ -497,7 +466,7 @@ index 0205276..aa6c6f3 100644
          }
          else
          {
-@@ -2971,6 +3124,132 @@ void Video::Present()
+@@ -2971,6 +3120,132 @@ void Video::Present()
      }
  
      g_presentProfiler.Reset();
@@ -630,7 +599,7 @@ index 0205276..aa6c6f3 100644
  }
  
  void Video::StartPipelinePrecompilation()
-@@ -3092,6 +3371,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
+@@ -3092,6 +3367,9 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
  
      g_executedCommandList = true;
      g_executedCommandList.notify_one();
@@ -640,7 +609,7 @@ index 0205276..aa6c6f3 100644
  }
  
  static void ProcBeginCommandList(const RenderCommand& cmd)
-@@ -4288,7 +4570,32 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
+@@ -4288,7 +4566,32 @@ static RenderPipeline* CreateGraphicsPipelineInRenderThread(PipelineState pipeli
      auto& pipeline = g_pipelines[hash];
      if (pipeline == nullptr)
      {
@@ -673,7 +642,7 @@ index 0205276..aa6c6f3 100644
  
  #ifdef ASYNC_PSO_DEBUG
          bool loading = *SWA::SGlobals::ms_IsLoading;
-@@ -4581,11 +4888,21 @@ static void ProcSetPixelShaderConstants(const RenderCommand& cmd)
+@@ -4581,11 +4884,21 @@ static void ProcSetPixelShaderConstants(const RenderCommand& cmd)
  static void ProcAddPipeline(const RenderCommand& cmd)
  {
      auto& args = cmd.addPipeline;
@@ -695,7 +664,7 @@ index 0205276..aa6c6f3 100644
  #ifdef ASYNC_PSO_DEBUG
          ++g_pipelinesCreatedAsynchronously;
  #endif
-@@ -4595,7 +4912,9 @@ static void ProcAddPipeline(const RenderCommand& cmd)
+@@ -4595,7 +4908,9 @@ static void ProcAddPipeline(const RenderCommand& cmd)
  #ifdef ASYNC_PSO_DEBUG
          ++g_pipelinesDropped;
  #endif
@@ -705,7 +674,7 @@ index 0205276..aa6c6f3 100644
      }
  }
  
-@@ -6385,6 +6704,9 @@ struct PipelineStateQueueItem
+@@ -6385,6 +6700,9 @@ struct PipelineStateQueueItem
      XXH64_hash_t pipelineHash;
      PipelineState pipelineState;
      std::shared_ptr<PipelineTaskToken> token;
@@ -715,7 +684,7 @@ index 0205276..aa6c6f3 100644
  #ifdef ASYNC_PSO_DEBUG
      std::string pipelineName;
  #endif
-@@ -6393,11 +6715,20 @@ struct PipelineStateQueueItem
+@@ -6393,11 +6711,20 @@ struct PipelineStateQueueItem
  static moodycamel::BlockingConcurrentQueue<PipelineStateQueueItem> g_pipelineStateQueue;
  
  static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipelineState
@@ -736,7 +705,7 @@ index 0205276..aa6c6f3 100644
      auto pipeline = CreateGraphicsPipeline(pipelineState);
  #ifdef ASYNC_PSO_DEBUG
      pipeline->setName(pipelineName);
-@@ -6407,8 +6738,27 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
+@@ -6407,8 +6734,27 @@ static void CompilePipeline(XXH64_hash_t pipelineHash, const PipelineState& pipe
      RenderCommand cmd;
      cmd.type = RenderCommandType::AddPipeline;
      cmd.addPipeline.hash = pipelineHash;
@@ -764,7 +733,7 @@ index 0205276..aa6c6f3 100644
  }
  
  static void PipelineCompilerThread()
-@@ -6446,6 +6796,9 @@ static void PipelineCompilerThread()
+@@ -6446,6 +6792,9 @@ static void PipelineCompilerThread()
  #endif
  
          CompilePipeline(queueItem.pipelineHash, queueItem.pipelineState
@@ -774,7 +743,7 @@ index 0205276..aa6c6f3 100644
  #ifdef ASYNC_PSO_DEBUG
              , queueItem.pipelineName.c_str()
  #endif
-@@ -6493,6 +6846,7 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6493,6 +6842,7 @@ static void EnqueueGraphicsPipelineCompilation(
  
      if (shouldCompile)
      {
@@ -782,7 +751,7 @@ index 0205276..aa6c6f3 100644
          bool loading = *SWA::SGlobals::ms_IsLoading;
          if (!loading && isPrecompiledPipeline)
          {
-@@ -6504,7 +6858,9 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6504,7 +6854,9 @@ static void EnqueueGraphicsPipelineCompilation(
              );
          }
          else
@@ -792,7 +761,7 @@ index 0205276..aa6c6f3 100644
              if (tokenPair.sharedToken == nullptr && tokenPair.token.type != PipelineTaskType::Null)
                  tokenPair.sharedToken = std::make_shared<PipelineTaskToken>(std::move(tokenPair.token));
  
-@@ -6512,10 +6868,35 @@ static void EnqueueGraphicsPipelineCompilation(
+@@ -6512,10 +6864,35 @@ static void EnqueueGraphicsPipelineCompilation(
              queueItem.pipelineHash = hash;
              queueItem.pipelineState = pipelineState;
              queueItem.token = tokenPair.sharedToken;
@@ -828,7 +797,7 @@ index 0205276..aa6c6f3 100644
          }
      }
  
-@@ -7086,27 +7467,85 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
+@@ -7086,27 +7463,85 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
      }
  }
  
@@ -914,7 +883,7 @@ index 0205276..aa6c6f3 100644
  }
  
  // CModelData::CheckMadeAll
-@@ -7273,6 +7712,11 @@ static void PipelineTaskConsumerThread()
+@@ -7273,6 +7708,11 @@ static void PipelineTaskConsumerThread()
  
      std::vector<PipelineTask> localPipelineTaskQueue;
      std::unique_ptr<GuestThreadContext> ctx;
@@ -926,7 +895,7 @@ index 0205276..aa6c6f3 100644
  
      while (true)
      {
-@@ -7291,9 +7735,26 @@ static void PipelineTaskConsumerThread()
+@@ -7291,9 +7731,26 @@ static void PipelineTaskConsumerThread()
          }
  
          bool allHandled = true;
@@ -953,7 +922,7 @@ index 0205276..aa6c6f3 100644
              switch (type)
              {
              case PipelineTaskType::DatabaseData:
-@@ -7358,6 +7819,21 @@ static void PipelineTaskConsumerThread()
+@@ -7358,6 +7815,21 @@ static void PipelineTaskConsumerThread()
                  else
                  {
                      allHandled = false;
@@ -975,7 +944,7 @@ index 0205276..aa6c6f3 100644
                  }
  
                  break;
-@@ -7365,6 +7841,9 @@ static void PipelineTaskConsumerThread()
+@@ -7365,6 +7837,9 @@ static void PipelineTaskConsumerThread()
  
              case PipelineTaskType::PrecompilePipelines:
              {
@@ -985,7 +954,7 @@ index 0205276..aa6c6f3 100644
                  // Deliberately leaving the type null to account for the enqueue
                  // call not incrementing the compiling pipeline task counter.
                  PipelineTaskTokenPair tokenPair;
-@@ -7513,11 +7992,54 @@ static void PipelineTaskConsumerThread()
+@@ -7513,11 +7988,54 @@ static void PipelineTaskConsumerThread()
                  break;
              }
              }
@@ -1053,18 +1022,10 @@ index 80a0b21..9fe9378 100644
      static void ComputeViewportDimensions();
  };
 diff --git a/UnleashedRecomp/hid/driver/sdl_hid.cpp b/UnleashedRecomp/hid/driver/sdl_hid.cpp
-index 7623552..f4df262 100644
+index 7623552..5b9a424 100644
 --- a/UnleashedRecomp/hid/driver/sdl_hid.cpp
 +++ b/UnleashedRecomp/hid/driver/sdl_hid.cpp
-@@ -4,6 +4,7 @@
- #include <hid/hid.h>
- #include <os/logger.h>
- #include <ui/game_window.h>
-+#include <ui/touch_controls.h>
- #include <kernel/xdm.h>
- #include <app.h>
- 
-@@ -243,7 +244,12 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
+@@ -243,7 +243,12 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
              auto* controller = FindController(event->cdevice.which);
  
              if (controller)
@@ -1077,106 +1038,6 @@ index 7623552..f4df262 100644
  
              break;
          }
-@@ -288,6 +294,9 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
-         case SDL_MOUSEBUTTONDOWN:
-         case SDL_MOUSEBUTTONUP:
-         {
-+            if (TouchControls::CapturesEmulatedMouse(event))
-+                break;
-+
-             if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
-                 SDL_ShowCursor(SDL_ENABLE);
- 
-@@ -341,6 +350,20 @@ void hid::Init()
-     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
- }
- 
-+bool hid::IsDualSenseConnected()
-+{
-+    for (const auto& controller : g_controllers)
-+    {
-+        if (controller.controller &&
-+            controller.GetControllerType() == SDL_CONTROLLER_TYPE_PS5)
-+        {
-+            return true;
-+        }
-+    }
-+
-+    return false;
-+}
-+
- uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
- {
-     static uint32_t packet;
-@@ -352,10 +375,16 @@ uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
- 
-     pState->dwPacketNumber = packet++;
- 
--    if (!g_activeController)
-+    const bool touchActive = TouchControls::IsActive();
-+
-+    if (!g_activeController && !touchActive)
-         return ERROR_DEVICE_NOT_CONNECTED;
- 
--    pState->Gamepad = g_activeController->state;
-+    if (g_activeController)
-+        pState->Gamepad = g_activeController->state;
-+
-+    if (touchActive)
-+        TouchControls::ApplyToState(pState->Gamepad);
- 
-     return ERROR_SUCCESS;
- }
-@@ -365,6 +394,9 @@ uint32_t hid::SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration)
-     if (!pVibration)
-         return ERROR_BAD_ARGUMENTS;
- 
-+    if (!g_activeController && TouchControls::IsActive())
-+        return ERROR_SUCCESS;
-+
-     if (!g_activeController)
-         return ERROR_DEVICE_NOT_CONNECTED;
- 
-@@ -378,7 +410,9 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
-     if (!pCaps)
-         return ERROR_BAD_ARGUMENTS;
- 
--    if (!g_activeController)
-+    const bool touchActive = TouchControls::IsActive();
-+
-+    if (!g_activeController && !touchActive)
-         return ERROR_DEVICE_NOT_CONNECTED;
- 
-     memset(pCaps, 0, sizeof(*pCaps));
-@@ -386,8 +420,14 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
-     pCaps->Type = XAMINPUT_DEVTYPE_GAMEPAD;
-     pCaps->SubType = XAMINPUT_DEVSUBTYPE_GAMEPAD; // TODO: other types?
-     pCaps->Flags = 0;
--    pCaps->Gamepad = g_activeController->state;
--    pCaps->Vibration = g_activeController->vibration;
-+    if (g_activeController)
-+    {
-+        pCaps->Gamepad = g_activeController->state;
-+        pCaps->Vibration = g_activeController->vibration;
-+    }
-+
-+    if (touchActive)
-+        TouchControls::ApplyToState(pCaps->Gamepad);
- 
-     return ERROR_SUCCESS;
- }
-diff --git a/UnleashedRecomp/hid/hid.h b/UnleashedRecomp/hid/hid.h
-index d61131f..1101524 100644
---- a/UnleashedRecomp/hid/hid.h
-+++ b/UnleashedRecomp/hid/hid.h
-@@ -43,6 +43,7 @@ namespace hid
-     uint32_t SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration);
-     uint32_t GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps);
- 
-+    bool IsDualSenseConnected();
-     void SetProhibitedInputs(uint16_t wButtons = 0, bool leftStick = false, bool rightStick = false);
-     bool IsInputAllowed();
-     bool IsInputDeviceController();
 diff --git a/UnleashedRecomp/kernel/io/file_system.cpp b/UnleashedRecomp/kernel/io/file_system.cpp
 index a765d12..b1713ce 100644
 --- a/UnleashedRecomp/kernel/io/file_system.cpp
@@ -1781,7 +1642,7 @@ index 61ac40d..05f350b 100644
 +#endif
  }
 diff --git a/UnleashedRecomp/patches/aspect_ratio_patches.cpp b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
-index 02f49ee..1e2f7b0 100644
+index 02f49ee..2171a28 100644
 --- a/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 +++ b/UnleashedRecomp/patches/aspect_ratio_patches.cpp
 @@ -5,6 +5,9 @@
@@ -1794,7 +1655,7 @@ index 02f49ee..1e2f7b0 100644
  
  #include "aspect_ratio_patches.h"
  #include "camera_patches.h"
-@@ -78,16 +81,86 @@ namespace Chao::CSD
+@@ -78,16 +81,87 @@ namespace Chao::CSD
  
  static Mutex g_pathMutex;
  static std::map<const void*, XXH64_hash_t> g_paths;
@@ -1855,9 +1716,10 @@ index 02f49ee..1e2f7b0 100644
 +         value.find("/btn_B/") != std::string_view::npos ||
 +         value.find("/btn_B_txt/") != std::string_view::npos))
 +        g_arcadeHiddenTitlePaths.insert(HashStr(value));
-+    // Hide the entire lives scene, not just its number: player_count also owns
-+    // the Sonic head icon. Leave time, score, rings and energy scenes untouched.
-+    if (value == "ui_playscreen/player_count" || value.starts_with("ui_playscreen/player_count/"))
++    // Day stages and missions use separate HUD projects. Each player_count
++    // scene owns both the lives number and the Sonic head icon.
++    if (value == "ui_playscreen/player_count" || value.starts_with("ui_playscreen/player_count/") ||
++        value == "ui_missionscreen/player_count" || value.starts_with("ui_missionscreen/player_count/"))
 +        g_arcadeHiddenTitlePaths.insert(HashStr(value));
 +    // Remove entire medal groups, including their child counters, from native UI.
 +    if ((value.starts_with("ui_worldmap/") || value.starts_with("ui_playscreen/") ||
@@ -1881,7 +1743,7 @@ index 02f49ee..1e2f7b0 100644
  }
  
  static void TraverseCast(Chao::CSD::Scene* scene, uint32_t castNodeIndex, Chao::CSD::CastNode* castNode, uint32_t castIndex, const std::string& parentPath)
-@@ -257,7 +330,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
+@@ -257,7 +331,7 @@ PPC_FUNC_IMPL(__imp__sub_8258B558);
  PPC_FUNC(sub_8258B558)
  {
      auto r3 = ctx.r3;
@@ -1890,7 +1752,7 @@ index 02f49ee..1e2f7b0 100644
  
      uint32_t worldMapSimpleInfo = PPC_LOAD_U32(r3.u32 + 0x70);
      if (worldMapSimpleInfo != NULL)
-@@ -355,6 +428,7 @@ enum
+@@ -355,6 +429,7 @@ enum
      CONTROL_TUTORIAL = 1 << 22,
  
      LOADING_ARROW = 1 << 23,
@@ -1898,7 +1760,7 @@ index 02f49ee..1e2f7b0 100644
  };
  
  struct CsdModifier
-@@ -801,6 +875,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
+@@ -801,6 +876,12 @@ static std::optional<CsdModifier> FindModifier(uint32_t data)
              return {};
  
          path = findResult->second;
@@ -1911,7 +1773,7 @@ index 02f49ee..1e2f7b0 100644
      }
  
      auto findResult = g_modifiers.find(path);
-@@ -1134,6 +1214,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
+@@ -1134,6 +1215,19 @@ static void Draw(PPCContext& ctx, uint8_t* base, PPCFunc* original, uint32_t str
          BlackBar::g_loadingBlackBarMax = ImVec2{ position[0], position[1] };
      }
  
@@ -2391,7 +2253,7 @@ index 817db38..c890dc5 100644
          <true />
          <key>LSApplicationCategoryType</key>
 diff --git a/UnleashedRecomp/res/version.txt b/UnleashedRecomp/res/version.txt
-index d9130f4..48f5779 100644
+index d9130f4..4637e9f 100644
 --- a/UnleashedRecomp/res/version.txt
 +++ b/UnleashedRecomp/res/version.txt
 @@ -1,4 +1,4 @@
@@ -2399,18 +2261,12 @@ index d9130f4..48f5779 100644
  VERSION_MAJOR=1
  VERSION_MINOR=0
 -VERSION_REVISION=3
-+VERSION_REVISION=16
++VERSION_REVISION=17
 diff --git a/UnleashedRecomp/ui/game_window.cpp b/UnleashedRecomp/ui/game_window.cpp
-index 5f1259a..2884035 100644
+index 5f1259a..fc2d1f1 100644
 --- a/UnleashedRecomp/ui/game_window.cpp
 +++ b/UnleashedRecomp/ui/game_window.cpp
-@@ -1,4 +1,5 @@
- #include "game_window.h"
-+#include <ui/touch_controls.h>
- #include <gpu/video.h>
- #include <os/logger.h>
- #include <os/user.h>
-@@ -6,6 +7,9 @@
+@@ -6,6 +6,9 @@
  #include <app.h>
  #include <sdl_listener.h>
  #include <SDL_syswm.h>
@@ -2420,16 +2276,7 @@ index 5f1259a..2884035 100644
  
  #if _WIN32
  #include <dwmapi.h>
-@@ -20,7 +24,7 @@ bool m_isResizing = false;
- 
- int Window_OnSDLEvent(void*, SDL_Event* event)
- {
--    if (ImGui::GetIO().BackendPlatformUserData != nullptr)
-+    if (!TouchControls::CapturesEmulatedMouse(event) && ImGui::GetIO().BackendPlatformUserData != nullptr)
-         ImGui_ImplSDL2_ProcessEvent(event);
- 
-     for (auto listener : GetEventListeners())
-@@ -35,11 +39,17 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
+@@ -35,11 +38,17 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
      {
          case SDL_APP_WILLENTERBACKGROUND:
          {
@@ -2447,12 +2294,13 @@ index 5f1259a..2884035 100644
              Video::HandleApplicationBackgroundState(false);
              break;
          }
-@@ -172,6 +182,10 @@ void GameWindow::Init(const char* sdlVideoDriver)
+@@ -172,6 +181,11 @@ void GameWindow::Init(const char* sdlVideoDriver)
      SDL_SetHint("SDL_APP_ID", "io.github.hedge_dev.unleashedrecomp");
  #endif
  
 +#ifdef UNLEASHED_RECOMP_IOS
 +    SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
++    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 +#endif
 +
      if (SDL_VideoInit(sdlVideoDriver) != 0 && sdlVideoDriver)
@@ -2484,688 +2332,6 @@ index 5f1259a..2884035 100644
  
  #ifdef SDL_VULKAN_ENABLED
      flags |= SDL_WINDOW_VULKAN;
-diff --git a/UnleashedRecomp/ui/touch_controls.cpp b/UnleashedRecomp/ui/touch_controls.cpp
-new file mode 100644
-index 0000000..11533b2
---- /dev/null
-+++ b/UnleashedRecomp/ui/touch_controls.cpp
-@@ -0,0 +1,654 @@
-+#include "touch_controls.h"
-+
-+#include <algorithm>
-+#include <array>
-+#include <atomic>
-+#include <cfloat>
-+#include <cmath>
-+#include <cstddef>
-+#include <cstdint>
-+#include <mutex>
-+#include <vector>
-+
-+#include <imgui.h>
-+
-+#include <hid/hid.h>
-+#include <sdl_listener.h>
-+
-+namespace
-+{
-+    constexpr SDL_FingerID NO_FINGER = -1;
-+
-+    enum class FaceSymbol
-+    {
-+        None,
-+        Square,
-+        Triangle,
-+        Circle,
-+        Cross
-+    };
-+
-+    struct VirtualButton
-+    {
-+        ImVec2 centre{};
-+        ImVec2 minimum{};
-+        ImVec2 maximum{};
-+        float drawRadius{};
-+        float hitRadius{};
-+        uint16_t buttonMask{};
-+        FaceSymbol symbol{ FaceSymbol::None };
-+        const char* label{};
-+        SDL_FingerID fingerId{ NO_FINGER };
-+        bool isCapsule{};
-+        bool isRightTrigger{};
-+        bool pressed{};
-+    };
-+
-+    struct VirtualStick
-+    {
-+        ImVec2 centre{};
-+        ImVec2 delta{};
-+        float radius{};
-+        float hitRadius{};
-+        SDL_FingerID fingerId{ NO_FINGER };
-+    };
-+
-+    enum ButtonIndex : size_t
-+    {
-+        BUTTON_SQUARE,
-+        BUTTON_TRIANGLE,
-+        BUTTON_CIRCLE,
-+        BUTTON_CROSS,
-+        BUTTON_L1,
-+        BUTTON_R1,
-+        BUTTON_R2,
-+        BUTTON_START,
-+        BUTTON_COUNT
-+    };
-+
-+    static VirtualStick g_leftStick;
-+    static std::array<VirtualButton, BUTTON_COUNT> g_buttons;
-+    static XAMINPUT_GAMEPAD g_gamepadState{};
-+    static std::atomic<bool> g_isActive;
-+    static std::mutex g_stateMutex;
-+    static float g_viewportWidth = 1280.0f;
-+    static float g_viewportHeight = 720.0f;
-+
-+    static float DistanceSquared(const ImVec2& a, const ImVec2& b)
-+    {
-+        const float x = a.x - b.x;
-+        const float y = a.y - b.y;
-+        return x * x + y * y;
-+    }
-+
-+    static float ViewportWidth()
-+    {
-+        return g_viewportWidth;
-+    }
-+
-+    static float ViewportHeight()
-+    {
-+        return g_viewportHeight;
-+    }
-+
-+    static ImVec2 GetTouchPoint(const SDL_TouchFingerEvent& touch)
-+    {
-+        int drawableWidth = 0;
-+        int drawableHeight = 0;
-+
-+        if (SDL_Window* window = SDL_GetWindowFromID(touch.windowID))
-+            SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight);
-+
-+        if (drawableWidth <= 0 || drawableHeight <= 0)
-+            return { touch.x * ViewportWidth(), touch.y * ViewportHeight() };
-+
-+        const float offsetX = (float(drawableWidth) - ViewportWidth()) * 0.5f;
-+        const float offsetY = (float(drawableHeight) - ViewportHeight()) * 0.5f;
-+        return {
-+            touch.x * float(drawableWidth) - offsetX,
-+            touch.y * float(drawableHeight) - offsetY
-+        };
-+    }
-+
-+    static void ConfigureCircleButton(
-+        ButtonIndex index,
-+        const ImVec2& centre,
-+        float drawRadius,
-+        uint16_t buttonMask,
-+        FaceSymbol symbol)
-+    {
-+        auto& button = g_buttons[index];
-+        button.centre = centre;
-+        button.drawRadius = drawRadius;
-+        button.hitRadius = drawRadius * 1.42f;
-+        button.buttonMask = buttonMask;
-+        button.symbol = symbol;
-+        button.label = nullptr;
-+        button.isCapsule = false;
-+        button.isRightTrigger = false;
-+    }
-+
-+    static void ConfigureCapsuleButton(
-+        ButtonIndex index,
-+        const ImVec2& centre,
-+        float width,
-+        float height,
-+        const char* label,
-+        uint16_t buttonMask,
-+        bool isRightTrigger = false)
-+    {
-+        auto& button = g_buttons[index];
-+        button.centre = centre;
-+        button.minimum = { centre.x - width * 0.5f, centre.y - height * 0.5f };
-+        button.maximum = { centre.x + width * 0.5f, centre.y + height * 0.5f };
-+        button.drawRadius = height * 0.5f;
-+        button.hitRadius = 0.0f;
-+        button.buttonMask = buttonMask;
-+        button.symbol = FaceSymbol::None;
-+        button.label = label;
-+        button.isCapsule = true;
-+        button.isRightTrigger = isRightTrigger;
-+    }
-+
-+    static void UpdateLayout()
-+    {
-+        const float width = ViewportWidth();
-+        const float height = ViewportHeight();
-+        const float scale = std::max(0.5f, height / 720.0f);
-+        const float edgeInset = std::max(44.0f * scale, width * 0.04f);
-+        const float bottomInset = 44.0f * scale;
-+
-+        const float stickRadius = 84.0f * scale;
-+        g_leftStick.centre = { edgeInset + stickRadius, height - bottomInset - stickRadius };
-+        g_leftStick.radius = stickRadius;
-+        g_leftStick.hitRadius = stickRadius * 1.38f;
-+
-+        const float faceRadius = 35.0f * scale;
-+        const float faceGap = 73.0f * scale;
-+        const ImVec2 faceCentre = {
-+            width - edgeInset - faceRadius - faceGap,
-+            height - bottomInset - faceRadius - faceGap
-+        };
-+
-+        ConfigureCircleButton(BUTTON_SQUARE,
-+            { faceCentre.x - faceGap, faceCentre.y }, faceRadius,
-+            XAMINPUT_GAMEPAD_X, FaceSymbol::Square);
-+        ConfigureCircleButton(BUTTON_TRIANGLE,
-+            { faceCentre.x, faceCentre.y - faceGap }, faceRadius,
-+            XAMINPUT_GAMEPAD_Y, FaceSymbol::Triangle);
-+        ConfigureCircleButton(BUTTON_CIRCLE,
-+            { faceCentre.x + faceGap, faceCentre.y }, faceRadius,
-+            XAMINPUT_GAMEPAD_B, FaceSymbol::Circle);
-+        ConfigureCircleButton(BUTTON_CROSS,
-+            { faceCentre.x, faceCentre.y + faceGap }, faceRadius,
-+            XAMINPUT_GAMEPAD_A, FaceSymbol::Cross);
-+
-+        const float shoulderWidth = 78.0f * scale;
-+        const float shoulderHeight = 44.0f * scale;
-+        const float shoulderGap = 10.0f * scale;
-+        const float shoulderOffset = (shoulderWidth + shoulderGap) * 0.5f;
-+        const float shoulderY = g_leftStick.centre.y - g_leftStick.radius - 54.0f * scale;
-+
-+        ConfigureCapsuleButton(BUTTON_L1,
-+            { g_leftStick.centre.x - shoulderOffset, shoulderY },
-+            shoulderWidth, shoulderHeight, "L1", XAMINPUT_GAMEPAD_LEFT_SHOULDER);
-+        ConfigureCapsuleButton(BUTTON_R1,
-+            { g_leftStick.centre.x + shoulderOffset, shoulderY },
-+            shoulderWidth, shoulderHeight, "R1", XAMINPUT_GAMEPAD_RIGHT_SHOULDER);
-+
-+        ConfigureCapsuleButton(BUTTON_R2,
-+            {
-+                width - edgeInset - shoulderWidth * 0.5f,
-+                faceCentre.y - faceGap * 1.48f
-+            },
-+            shoulderWidth, shoulderHeight, "R2", 0, true);
-+
-+        ConfigureCapsuleButton(BUTTON_START,
-+            { width * 0.5f, height - bottomInset },
-+            104.0f * scale, 40.0f * scale, "START", XAMINPUT_GAMEPAD_START);
-+    }
-+
-+    static bool HitTest(const VirtualButton& button, const ImVec2& point)
-+    {
-+        if (!button.isCapsule)
-+            return DistanceSquared(button.centre, point) <= button.hitRadius * button.hitRadius;
-+
-+        const float padding = button.drawRadius * 0.35f;
-+        return point.x >= button.minimum.x - padding && point.x <= button.maximum.x + padding &&
-+            point.y >= button.minimum.y - padding && point.y <= button.maximum.y + padding;
-+    }
-+
-+    static VirtualButton* FindButton(const ImVec2& point, SDL_FingerID fingerId)
-+    {
-+        VirtualButton* result = nullptr;
-+        float nearestDistance = FLT_MAX;
-+
-+        for (auto& button : g_buttons)
-+        {
-+            if ((button.fingerId != NO_FINGER && button.fingerId != fingerId) || !HitTest(button, point))
-+                continue;
-+
-+            const float distance = DistanceSquared(button.centre, point);
-+            if (distance < nearestDistance)
-+            {
-+                nearestDistance = distance;
-+                result = &button;
-+            }
-+        }
-+
-+        return result;
-+    }
-+
-+    static void RebuildButtons()
-+    {
-+        g_gamepadState.wButtons = 0;
-+        g_gamepadState.bRightTrigger = 0;
-+
-+        for (const auto& button : g_buttons)
-+        {
-+            if (!button.pressed)
-+                continue;
-+
-+            if (button.isRightTrigger)
-+                g_gamepadState.bRightTrigger = 255;
-+            else
-+                g_gamepadState.wButtons |= button.buttonMask;
-+        }
-+    }
-+
-+    static void ResetState()
-+    {
-+        g_gamepadState = {};
-+        g_leftStick.delta = {};
-+        g_leftStick.fingerId = NO_FINGER;
-+
-+        for (auto& button : g_buttons)
-+        {
-+            button.fingerId = NO_FINGER;
-+            button.pressed = false;
-+        }
-+    }
-+
-+    static void SetStickPoint(const ImVec2& point)
-+    {
-+        ImVec2 delta = { point.x - g_leftStick.centre.x, point.y - g_leftStick.centre.y };
-+        const float length = sqrtf(delta.x * delta.x + delta.y * delta.y);
-+
-+        if (length > g_leftStick.radius && length > 0.0f)
-+        {
-+            const float clampScale = g_leftStick.radius / length;
-+            delta.x *= clampScale;
-+            delta.y *= clampScale;
-+        }
-+
-+        g_leftStick.delta = delta;
-+        g_gamepadState.sThumbLX = int16_t(std::clamp(delta.x / g_leftStick.radius, -1.0f, 1.0f) * 32767.0f);
-+        g_gamepadState.sThumbLY = int16_t(std::clamp(-delta.y / g_leftStick.radius, -1.0f, 1.0f) * 32767.0f);
-+    }
-+
-+    static void MarkTouchInputActive()
-+    {
-+        hid::g_inputDevice = hid::EInputDevice::PlayStation;
-+        hid::g_inputDeviceController = hid::EInputDevice::PlayStation;
-+        hid::g_inputDeviceExplicit = hid::EInputDeviceExplicit::DualSense;
-+        SDL_ShowCursor(SDL_DISABLE);
-+    }
-+
-+    static bool HandleFingerDown(SDL_FingerID fingerId, const ImVec2& point)
-+    {
-+        if (auto* button = FindButton(point, fingerId))
-+        {
-+            button->fingerId = fingerId;
-+            button->pressed = true;
-+            RebuildButtons();
-+            MarkTouchInputActive();
-+            return true;
-+        }
-+
-+        if (g_leftStick.fingerId == NO_FINGER &&
-+            DistanceSquared(g_leftStick.centre, point) <= g_leftStick.hitRadius * g_leftStick.hitRadius)
-+        {
-+            g_leftStick.fingerId = fingerId;
-+            SetStickPoint(point);
-+            MarkTouchInputActive();
-+            return true;
-+        }
-+
-+        return false;
-+    }
-+
-+    static bool HandleFingerMotion(SDL_FingerID fingerId, const ImVec2& point)
-+    {
-+        if (g_leftStick.fingerId == fingerId)
-+        {
-+            SetStickPoint(point);
-+            return true;
-+        }
-+
-+        const auto ownedButtonIterator = std::find_if(g_buttons.begin(), g_buttons.end(),
-+            [fingerId](const VirtualButton& button) { return button.fingerId == fingerId; });
-+        if (ownedButtonIterator == g_buttons.end())
-+            return false;
-+
-+        auto* ownedButton = &*ownedButtonIterator;
-+
-+        if (HitTest(*ownedButton, point))
-+            return true;
-+
-+        ownedButton->fingerId = NO_FINGER;
-+        ownedButton->pressed = false;
-+
-+        if (auto* nextButton = FindButton(point, fingerId))
-+        {
-+            nextButton->fingerId = fingerId;
-+            nextButton->pressed = true;
-+        }
-+
-+        RebuildButtons();
-+        return true;
-+    }
-+
-+    static bool HandleFingerUp(SDL_FingerID fingerId)
-+    {
-+        if (g_leftStick.fingerId == fingerId)
-+        {
-+            g_leftStick.fingerId = NO_FINGER;
-+            g_leftStick.delta = {};
-+            g_gamepadState.sThumbLX = 0;
-+            g_gamepadState.sThumbLY = 0;
-+            return true;
-+        }
-+
-+        bool released = false;
-+        for (auto& button : g_buttons)
-+        {
-+            if (button.fingerId != fingerId)
-+                continue;
-+
-+            button.fingerId = NO_FINGER;
-+            button.pressed = false;
-+            released = true;
-+        }
-+
-+        if (released)
-+            RebuildButtons();
-+
-+        return released;
-+    }
-+
-+    static ImU32 WithAlpha(ImU32 colour, uint8_t alpha)
-+    {
-+        return (colour & IM_COL32(255, 255, 255, 0)) | (ImU32(alpha) << IM_COL32_A_SHIFT);
-+    }
-+
-+    static ImU32 SymbolColour(FaceSymbol symbol)
-+    {
-+        switch (symbol)
-+        {
-+            case FaceSymbol::Square:
-+                return IM_COL32(255, 126, 207, 255);
-+            case FaceSymbol::Triangle:
-+                return IM_COL32(87, 229, 157, 255);
-+            case FaceSymbol::Circle:
-+                return IM_COL32(255, 116, 137, 255);
-+            case FaceSymbol::Cross:
-+                return IM_COL32(104, 192, 255, 255);
-+            default:
-+                return IM_COL32_WHITE;
-+        }
-+    }
-+
-+    static void DrawFaceSymbol(ImDrawList* drawList, const VirtualButton& button, float scale)
-+    {
-+        const ImU32 colour = WithAlpha(SymbolColour(button.symbol), button.pressed ? 255 : 220);
-+        const float size = button.drawRadius * 0.39f;
-+        const float thickness = 3.0f * scale;
-+        const ImVec2 centre = button.centre;
-+
-+        switch (button.symbol)
-+        {
-+            case FaceSymbol::Square:
-+                drawList->AddRect(
-+                    { centre.x - size, centre.y - size },
-+                    { centre.x + size, centre.y + size },
-+                    colour, 1.5f * scale, 0, thickness);
-+                break;
-+
-+            case FaceSymbol::Triangle:
-+                drawList->AddTriangle(
-+                    { centre.x, centre.y - size * 1.15f },
-+                    { centre.x - size, centre.y + size * 0.82f },
-+                    { centre.x + size, centre.y + size * 0.82f },
-+                    colour, thickness);
-+                break;
-+
-+            case FaceSymbol::Circle:
-+                drawList->AddCircle(centre, size, colour, 32, thickness);
-+                break;
-+
-+            case FaceSymbol::Cross:
-+                drawList->AddLine(
-+                    { centre.x - size, centre.y - size },
-+                    { centre.x + size, centre.y + size }, colour, thickness);
-+                drawList->AddLine(
-+                    { centre.x + size, centre.y - size },
-+                    { centre.x - size, centre.y + size }, colour, thickness);
-+                break;
-+
-+            default:
-+                break;
-+        }
-+    }
-+
-+    static void DrawFaceButton(ImDrawList* drawList, const VirtualButton& button, float scale)
-+    {
-+        const ImU32 fill = button.pressed ? IM_COL32(61, 127, 205, 178) : IM_COL32(17, 24, 39, 96);
-+        const ImU32 border = button.pressed ? IM_COL32(205, 233, 255, 245) : IM_COL32(224, 233, 246, 158);
-+
-+        if (button.pressed)
-+            drawList->AddCircleFilled(button.centre, button.drawRadius + 5.0f * scale, IM_COL32(89, 176, 255, 46), 36);
-+
-+        drawList->AddCircleFilled(button.centre, button.drawRadius, fill, 36);
-+        drawList->AddCircle(button.centre, button.drawRadius, border, 36, 2.0f * scale);
-+        DrawFaceSymbol(drawList, button, scale);
-+    }
-+
-+    static void DrawCapsuleButton(ImDrawList* drawList, const VirtualButton& button, float scale)
-+    {
-+        const ImU32 fill = button.pressed ? IM_COL32(61, 127, 205, 190) : IM_COL32(17, 24, 39, 108);
-+        const ImU32 border = button.pressed ? IM_COL32(205, 233, 255, 245) : IM_COL32(224, 233, 246, 170);
-+        const float rounding = button.drawRadius;
-+
-+        if (button.pressed)
-+        {
-+            drawList->AddRectFilled(
-+                { button.minimum.x - 4.0f * scale, button.minimum.y - 4.0f * scale },
-+                { button.maximum.x + 4.0f * scale, button.maximum.y + 4.0f * scale },
-+                IM_COL32(89, 176, 255, 44), rounding + 4.0f * scale);
-+        }
-+
-+        drawList->AddRectFilled(button.minimum, button.maximum, fill, rounding);
-+        drawList->AddRect(button.minimum, button.maximum, border, rounding, 0, 2.0f * scale);
-+
-+        const ImFont* font = ImGui::GetFont();
-+        const float fontSize = 17.0f * scale;
-+        const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, button.label);
-+        drawList->AddText(
-+            font,
-+            fontSize,
-+            { button.centre.x - textSize.x * 0.5f, button.centre.y - textSize.y * 0.5f },
-+            IM_COL32(240, 246, 255, 235),
-+            button.label);
-+    }
-+
-+    static void DrawStick(ImDrawList* drawList, float scale)
-+    {
-+        const bool pressed = g_leftStick.fingerId != NO_FINGER;
-+        const ImVec2 knobCentre = {
-+            g_leftStick.centre.x + g_leftStick.delta.x,
-+            g_leftStick.centre.y + g_leftStick.delta.y
-+        };
-+
-+        drawList->AddCircleFilled(g_leftStick.centre, g_leftStick.radius, IM_COL32(17, 24, 39, 78), 48);
-+        drawList->AddCircle(g_leftStick.centre, g_leftStick.radius, IM_COL32(224, 233, 246, 145), 48, 2.0f * scale);
-+        drawList->AddCircle(g_leftStick.centre, g_leftStick.radius * 0.58f, IM_COL32(224, 233, 246, 55), 40, 1.5f * scale);
-+
-+        if (pressed)
-+            drawList->AddCircleFilled(knobCentre, g_leftStick.radius * 0.39f, IM_COL32(89, 176, 255, 72), 36);
-+
-+        drawList->AddCircleFilled(
-+            knobCentre,
-+            g_leftStick.radius * 0.31f,
-+            pressed ? IM_COL32(164, 218, 255, 218) : IM_COL32(231, 238, 248, 178),
-+            36);
-+        drawList->AddCircle(
-+            knobCentre,
-+            g_leftStick.radius * 0.31f,
-+            IM_COL32(255, 255, 255, 205),
-+            36,
-+            1.5f * scale);
-+    }
-+
-+    class TouchEventListener : public SDLEventListener
-+    {
-+    public:
-+        bool OnSDLEvent(SDL_Event* event) override
-+        {
-+            if (event->type == SDL_APP_WILLENTERBACKGROUND ||
-+                (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_FOCUS_LOST))
-+            {
-+                std::lock_guard lock(g_stateMutex);
-+                ResetState();
-+                return false;
-+            }
-+
-+            if (!TouchControls::IsActive())
-+                return false;
-+
-+            std::lock_guard lock(g_stateMutex);
-+            if (!g_isActive.load(std::memory_order_acquire))
-+                return false;
-+
-+            UpdateLayout();
-+
-+            switch (event->type)
-+            {
-+                case SDL_FINGERDOWN:
-+                    return HandleFingerDown(event->tfinger.fingerId, GetTouchPoint(event->tfinger));
-+
-+                case SDL_FINGERMOTION:
-+                    return HandleFingerMotion(event->tfinger.fingerId, GetTouchPoint(event->tfinger));
-+
-+                case SDL_FINGERUP:
-+                    return HandleFingerUp(event->tfinger.fingerId);
-+
-+                default:
-+                    return false;
-+            }
-+        }
-+    };
-+
-+    static TouchEventListener g_touchEventListener;
-+}
-+
-+void TouchControls::Init()
-+{
-+    std::lock_guard lock(g_stateMutex);
-+    g_isActive.store(false, std::memory_order_release);
-+    UpdateLayout();
-+    ResetState();
-+}
-+
-+void TouchControls::SetActive(bool active)
-+{
-+    // Poll the HID driver's already-open controller handles every rendered
-+    // frame. A DualSense connection hides and releases the touch overlay; the
-+    // overlay becomes active again on the first frame after disconnection.
-+    active = active && !hid::IsDualSenseConnected();
-+
-+    std::lock_guard lock(g_stateMutex);
-+    if (g_isActive.load(std::memory_order_relaxed) && !active)
-+        ResetState();
-+
-+    g_isActive.store(active, std::memory_order_release);
-+}
-+
-+bool TouchControls::IsActive()
-+{
-+#ifdef UNLEASHED_RECOMP_IOS
-+    return g_isActive.load(std::memory_order_acquire);
-+#else
-+    return false;
-+#endif
-+}
-+
-+bool TouchControls::CapturesEmulatedMouse(const SDL_Event* event)
-+{
-+    if (!IsActive() || !event)
-+        return false;
-+
-+    switch (event->type)
-+    {
-+        case SDL_MOUSEBUTTONDOWN:
-+        case SDL_MOUSEBUTTONUP:
-+            return event->button.which == SDL_TOUCH_MOUSEID;
-+
-+        case SDL_MOUSEMOTION:
-+            return event->motion.which == SDL_TOUCH_MOUSEID;
-+
-+        default:
-+            return false;
-+    }
-+}
-+
-+XAMINPUT_GAMEPAD TouchControls::GetState()
-+{
-+    std::lock_guard lock(g_stateMutex);
-+    return g_gamepadState;
-+}
-+
-+void TouchControls::ApplyToState(XAMINPUT_GAMEPAD& state)
-+{
-+    const auto touchState = GetState();
-+    state.wButtons |= touchState.wButtons;
-+    state.bLeftTrigger = std::max(state.bLeftTrigger, touchState.bLeftTrigger);
-+    state.bRightTrigger = std::max(state.bRightTrigger, touchState.bRightTrigger);
-+
-+    if (touchState.sThumbLX != 0 || touchState.sThumbLY != 0)
-+    {
-+        state.sThumbLX = touchState.sThumbLX;
-+        state.sThumbLY = touchState.sThumbLY;
-+    }
-+}
-+
-+void TouchControls::Draw()
-+{
-+    if (!IsActive())
-+        return;
-+
-+    std::lock_guard lock(g_stateMutex);
-+    if (!g_isActive.load(std::memory_order_acquire))
-+        return;
-+
-+    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
-+    if (displaySize.x > 0.0f && displaySize.y > 0.0f)
-+    {
-+        g_viewportWidth = displaySize.x;
-+        g_viewportHeight = displaySize.y;
-+    }
-+
-+    UpdateLayout();
-+
-+    const float scale = std::max(0.5f, ViewportHeight() / 720.0f);
-+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
-+
-+    DrawStick(drawList, scale);
-+
-+    for (const auto& button : g_buttons)
-+    {
-+        if (button.isCapsule)
-+            DrawCapsuleButton(drawList, button, scale);
-+        else
-+            DrawFaceButton(drawList, button, scale);
-+    }
-+}
-diff --git a/UnleashedRecomp/ui/touch_controls.h b/UnleashedRecomp/ui/touch_controls.h
-new file mode 100644
-index 0000000..fe5e6b0
---- /dev/null
-+++ b/UnleashedRecomp/ui/touch_controls.h
-@@ -0,0 +1,16 @@
-+#pragma once
-+
-+#include <SDL.h>
-+#include <xbox.h>
-+
-+namespace TouchControls
-+{
-+    void Init();
-+    void SetActive(bool active);
-+    void Draw();
-+
-+    bool IsActive();
-+    bool CapturesEmulatedMouse(const SDL_Event* event);
-+    XAMINPUT_GAMEPAD GetState();
-+    void ApplyToState(XAMINPUT_GAMEPAD& state);
-+}
 diff --git a/UnleashedRecomp/user/paths.cpp b/UnleashedRecomp/user/paths.cpp
 index e72b473..6826d9d 100644
 --- a/UnleashedRecomp/user/paths.cpp
@@ -3707,7 +2873,7 @@ index 0000000..33bc0bd
 +}
 diff --git a/UnleashedRecomp/gpu/performance_experiments.h b/UnleashedRecomp/gpu/performance_experiments.h
 new file mode 100644
-index 0000000..26641b9
+index 0000000..ece4aac
 --- /dev/null
 +++ b/UnleashedRecomp/gpu/performance_experiments.h
 @@ -0,0 +1,194 @@
@@ -3728,7 +2894,7 @@ index 0000000..26641b9
 +
 +namespace IOSPerformance
 +{
-+inline constexpr const char* Build = "shader-warmup-1.0.16";
++inline constexpr const char* Build = "shader-warmup-1.0.17";
 +struct Config
 +{
 +    bool retryBackoff = false;

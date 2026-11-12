@@ -1,6 +1,8 @@
 # Sonic Unleashed Recompiled iOS — Day-Stage Arcade
 
-Current candidate: [1.0.16 shader warmup and Mazuri Act 5 dependency repair](arcade/shader-warmup.md).
+Version 1.0.17 is the controller-only candidate. It hides the lives counter and
+Sonic icon in Spagonia Act 3 and Shamar Act 3. The previous working build is
+[1.0.16](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/v1.0.16-working).
 The accepted 1.0.14 Arcade and 1.0.15 Performance Lab IPAs remain preserved
 locally. The candidate still requires native build and device verification;
 older diagnostic notes below are historical, not the current feature status.
@@ -89,19 +91,12 @@ The authoritative catalog is [`arcade/stages.json`](arcade/stages.json):
 | Empire City | 4 |
 | Eggmanland | 1 |
 
-## Touch and DualSense controls
+## Controller controls
 
-The touch layout has a left virtual stick; L1 and R1 side by side above it;
-Square, Triangle, Circle, and Cross in the PlayStation diamond; and R2 above
-the diamond's upper-right side. A Start button sits at the bottom center and
-maps to the standard Start/Options game input.
-
-The port's existing SDL controller driver already supplies the normal
-DualSense layout, including both sticks, D-pad, face buttons, shoulders,
-triggers, Options, touchpad/Back, rumble, and player LED. When a connected
-controller is identified as a PS5 DualSense, the touch controls disappear and
-release any active touches. They reappear automatically on the first rendered
-frame after the controller disconnects.
+Version 1.0.17 uses a physical controller. Pair your DualSense in iOS Bluetooth
+settings before playing. The existing SDL controller driver handles both
+sticks, the D-pad, face buttons, shoulders, triggers, Options, touchpad/Back,
+rumble, and the player LED.
 
 ## Why the final IPA is below 2 GB
 

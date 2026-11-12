@@ -1,10 +1,10 @@
-name: Compile unsigned Sonic Unleashed shader warmup candidate
+name: Compile unsigned Sonic Unleashed iOS
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: compile-ios-ipa
@@ -110,14 +110,16 @@ jobs:
               info = plistlib.loads(archive.read(prefix + "Info.plist"))
               assert info["CFBundleDisplayName"] == "Sonic Unleashed"
               assert info["CFBundleExecutable"] == "Sonic Unleashed"
-              assert info["CFBundleShortVersionString"] == "1.0.16"
+              assert info["CFBundleShortVersionString"] == "1.0.17"
+              assert info["CFBundleIdentifier"] == "hedge-dev.UnleashedRecomp"
               assert info["UILaunchScreen"] == {}
               assert info["UIStatusBarHidden"] is True
               assert info["UIViewControllerBasedStatusBarAppearance"] is False
               assert prefix + "Sonic Unleashed" in archive.namelist()
               executable = archive.read(prefix + "Sonic Unleashed")
               markers = (
-                  b"shader-warmup-1.0.16",
+                  b"shader-warmup-1.0.17",
+                  b"SDL_TOUCH_MOUSE_EVENTS",
                   b"IOS-SHADER-WARMUP v1",
                   b"IOS-SHADER-FALLBACK v1",
                   b"IOS-SHADER-ARCHIVE v1",
@@ -147,36 +149,17 @@ jobs:
               assert not missing_markers, f"Missing iOS runtime fixes: {missing_markers}"
               missing = sorted(prefix + icon for icon in icons if prefix + icon not in archive.namelist())
               assert not missing, f"Missing app icons: {missing}"
+              assert not any(name.startswith(prefix + "GameData/") for name in archive.namelist())
           PY
           mv out/Sonic-Unleashed.ipa "out/$IPA_NAME"
           shasum -a 256 "out/$IPA_NAME" > "out/$IPA_NAME.sha256"
 
-      - name: Publish compiled IPA for local data injection
-        shell: bash
-        run: |
-          set -euo pipefail
-          RELEASE_TAG="compiled-ios-${GITHUB_RUN_NUMBER}"
-          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          DO NOT INSTALL THIS IPA. This is a code-only build intermediate,
-          not the self-contained game. The final IPA must contain the owner's
-          locally injected game, update, DLC, save, and arcade overlay data.
-
-          Compiled unsigned arm64 iOS app for the private Sonic Unleashed
-          Day-Stage Arcade edition. It includes the iPhone Metal launch fix,
-          Sonic Unleashed app name and icon, title-to-selector flow, arcade
-          gameplay patches, native fullscreen presentation, background/resume
-          lifecycle handling, DualSense-style touch controls with Start,
-          automatic DualSense/touch handoff, and bundled-data support.
-
-          This intermediate IPA intentionally contains no full game data. The
-          owner's local packaging step injects the validated slim data tree and
-          produces one standard-ZIP IPA for Sideloadly.
-          NOTES
-          gh release create "$RELEASE_TAG" \
-            "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME" \
-            "$RUNNER_TEMP/UnleashedRecomp/out/$IPA_NAME.sha256" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "BUILD INTERMEDIATE - DO NOT INSTALL" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+      - name: Upload compiled IPA for local data injection
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: compiled-ios-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/UnleashedRecomp/out/${{ env.IPA_NAME }}
+            ${{ runner.temp }}/UnleashedRecomp/out/${{ env.IPA_NAME }}.sha256
+          if-no-files-found: error
+          compression-level: 0

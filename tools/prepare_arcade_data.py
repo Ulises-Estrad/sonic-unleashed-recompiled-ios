@@ -15,7 +15,12 @@ from pathlib import Path
 import shutil
 from typing import Iterable
 
-from build_arcade_mod import DEFAULT_CATALOG, load_catalog, validate_payload
+from build_arcade_mod import (
+    DEFAULT_CATALOG,
+    load_catalog,
+    stage_append_archives,
+    validate_payload,
+)
 
 
 REQUIRED_SAVE_FILES = ("ACH-DATA", "EXT-DATA", "SYS-DATA")
@@ -106,7 +111,7 @@ def catalog_archive_sets(catalog: dict) -> tuple[set[str], dict[str, set[str]]]:
     for country in catalog["countries"]:
         for stage in country["stages"]:
             all_archives.add(stage["archive"])
-            all_archives.update(stage.get("append", []))
+            all_archives.update(stage_append_archives(stage))
             if geometry := stage.get("geometry"):
                 all_archives.add(geometry)
             if stage["source"] != "game":
@@ -153,7 +158,8 @@ def keep_sideloadly_root_file(path: Path, archives: set[str]) -> bool:
 
     # Town, story, Tails, and unused boss archives cannot be reached from the
     # arcade flow. BossEggBeetle is retained because one selected Mazuri act
-    # explicitly appends it in the retail stage metadata.
+    # explicitly appends it in the retail stage metadata. catalog_archive_sets
+    # also includes BossCommon, the shared parent of that boss archive family.
     unreachable_prefixes = (
         "Town_",
         "CmnTown_",

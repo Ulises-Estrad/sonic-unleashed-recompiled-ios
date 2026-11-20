@@ -21,9 +21,12 @@ def bake(data: Path, overlay: Path, tool: Path, output: Path) -> None:
         for edits in sorted(work.iterdir()):
             if not edits.is_dir():
                 continue
+            # Chip's render models are in the unprefixed base archive.
+            archive_name = edits.name if edits.name == "SystemCommon" else f"#{edits.name}"
+            archive_sources = sources[:1] if edits.name == "SystemCommon" else sources
             found = False
-            for source in sources:
-                archive = source / f"#{edits.name}.arl"
+            for source in archive_sources:
+                archive = source / f"{archive_name}.arl"
                 if not archive.is_file():
                     continue
                 found = True
@@ -40,7 +43,7 @@ def bake(data: Path, overlay: Path, tool: Path, output: Path) -> None:
                 destination = output / source.relative_to(data)
                 destination.mkdir(parents=True, exist_ok=True)
                 result = subprocess.run([str(tool), str(extracted),
-                    str(destination / f"#{edits.name}.ar"), "-P", "-T=ar"],
+                    str(destination / f"{archive_name}.ar"), "-P", "-T=ar"],
                     capture_output=True, text=True)
                 if result.returncode:
                     raise RuntimeError(result.stdout + result.stderr)

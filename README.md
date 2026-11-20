@@ -8,41 +8,22 @@ re-sign and install.
 The source is pinned to
 [`Markos-Th09/UnleashedRecomp`](https://github.com/Markos-Th09/UnleashedRecomp)
 commit `5d5adbc7e6953990be3184e8614787d93940b713` on its `ios` branch.
-The working IPA uses this project's exact [tested source snapshot](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/tree/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e); the default branch is not the build provenance.
 
-## Current working build — 1.0.16
+## Latest release — 1.0.18
 
-[Download the full working IPA](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/download/v1.0.16-working/Sonic-Unleashed-1.0.16-Shader-Warmup-B24.ipa)
-· [Release notes and checksum](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/v1.0.16-working)
+[Download the full IPA](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/download/v1.0.18/Sonic-Unleashed-1.0.18.ipa)
+· [Release notes and checksum](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/v1.0.18)
 
-The owner reported this installed build working and accepted it as the current
-baseline on **September 29, 2026**. Development is paused here for now. This is
-the exact tested IPA, not a rebuild or a newly repackaged copy. Previous builds
-remain available.
+This controller-only release removes enemy XP from the remaining stage-specific
+reward tables, hides Chip's 3D model, and disables Files sharing for the app's
+Documents folder. Install with Sideloadly over your existing copy using the
+same signing settings to retain saves and settings.
 
-- File: `Sonic-Unleashed-1.0.16-Shader-Warmup-B24.ipa`
-- Version / numeric build: `1.0.16` / `1.24.1`
-- Size: `1,773,524,104` bytes
-- SHA-256: `f398aeb5a05984468c7850898965068dfa058ca12f12ce5af3c8ff725c029c11`
-- Source: [`b41f1e64a38244e923d42c0c179cb5bdf09a0b0e`](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/tree/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e)
-- Native build: [Actions run 24](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/actions/runs/36276171066)
-
-The full package contains the game, update, DLC, bundled save, arcade changes,
-touch controls, shader-warmup implementation and Mazuri Act 5 dependency repair.
-Its 1,462 bundled data files passed hash and CRC checks; the standard ZIP,
-iPhone metadata and executable were verified. GitHub's uploaded asset digest
-matches the exact local IPA.
-
-**Not every stage has been tested.** Owner acceptance does not establish
-comprehensive device validation or a measured sustained-FPS improvement.
-First-use shader compilation can still occur. See the
-[1.0.16 implementation notes](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/blob/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e/arcade/shader-warmup.md)
-for details; pre-release testing status in those historical notes predates
-this acceptance.
-
-Use Sideloadly to install the full IPA over the existing app **without deleting
-the app**, preserving its current saves and settings. Do not install a
-`compiled-ios-*` release: those are code-only build intermediates.
+The IPA passed package and bundled-data verification. The changed gameplay
+and Files behavior are awaiting an iPhone playtest. The
+[device-tested 1.0.16 build](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/v1.0.16-working)
+and [1.0.17 release](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/releases/tag/v1.0.17)
+are still available. Pick a full release IPA for Sideloadly.
 
 ## Arcade edition
 
@@ -66,7 +47,7 @@ the app**, preserving its current saves and settings. Do not install a
 - Uses the selector's direct stage flow, so Next after the normal rank screen
   returns to stage select without medal or EXP result pages.
 
-The [catalog for this build](https://github.com/Ulises-Estrad/sonic-unleashed-recompiled-ios/blob/b41f1e64a38244e923d42c0c179cb5bdf09a0b0e/arcade/stages.json) contains:
+The [stage catalog](arcade/stages.json) contains these acts.
 
 | Country | Acts |
 | --- | ---: |
@@ -80,19 +61,11 @@ The [catalog for this build](https://github.com/Ulises-Estrad/sonic-unleashed-re
 | Empire City | 4 |
 | Eggmanland | 1 |
 
-## Touch and DualSense controls
+## Controller controls
 
-The touch layout has a left virtual stick; L1 and R1 side by side above it;
-Square, Triangle, Circle, and Cross in the PlayStation diamond; and R2 above
-the diamond's upper-right side. A Start button sits at the bottom center and
-maps to the standard Start/Options game input.
-
-The port's existing SDL controller driver already supplies the normal
-DualSense layout, including both sticks, D-pad, face buttons, shoulders,
-triggers, Options, touchpad/Back, rumble, and player LED. When a connected
-controller is identified as a PS5 DualSense, the touch controls disappear and
-release any active touches. They reappear automatically on the first rendered
-frame after the controller disconnects.
+Play with a connected controller such as a DualSense. The iOS build uses the
+port's SDL controller mappings for sticks, D-pad, buttons, triggers, Options,
+touchpad/Back, rumble, and player LED.
 
 ## Why the final IPA is below 2 GB
 
@@ -124,9 +97,8 @@ The hosted runner builds the code-only intermediate. Full game and save data
 are injected and verified locally before an explicitly approved full release
 is uploaded. The 1.0.16 working IPA was published unchanged after owner acceptance.
 
-The general local packaging sequence below is historical guidance, not a reason
-to rebuild the accepted IPA. Use the pinned source snapshot and 1.0.16 notes
-for its exact provenance:
+The local packaging sequence builds and bakes the arcade overlay before
+preparing the bundled data and injecting it into the IPA.
 
 ```powershell
 python .\tools\build_arcade_mod.py `
@@ -135,10 +107,16 @@ python .\tools\build_arcade_mod.py `
   --eggmanland-mod "C:\path\to\eggmanland_day_sections_only.zip" `
   --output "C:\path\to\arcade-overlay"
 
+python .\tools\bake_arcade_archives.py `
+  --data-root "C:\path\to\UnleashedRecomp-Windows" `
+  --overlay "C:\path\to\arcade-overlay" `
+  --hedge-arc-pack "C:\path\to\HedgeArcPack.exe" `
+  --output "C:\path\to\arcade-baked"
+
 python .\tools\prepare_arcade_data.py `
   --data-root "C:\path\to\UnleashedRecomp-Windows" `
   --save-root "$env:APPDATA\UnleashedRecomp\save" `
-  --arcade-overlay "C:\path\to\arcade-overlay" `
+  --arcade-overlay "C:\path\to\arcade-baked" `
   --output "C:\path\to\prepared-arcade-data" `
   --profile sideloadly
 

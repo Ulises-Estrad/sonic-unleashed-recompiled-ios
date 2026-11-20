@@ -112,6 +112,8 @@ jobs:
               assert info["CFBundleExecutable"] == "Sonic Unleashed"
               assert info["CFBundleShortVersionString"] == "1.0.17"
               assert info["CFBundleIdentifier"] == "hedge-dev.UnleashedRecomp"
+              assert info["UIFileSharingEnabled"] is False
+              assert info["LSSupportsOpeningDocumentsInPlace"] is False
               assert info["UILaunchScreen"] == {}
               assert info["UIStatusBarHidden"] is True
               assert info["UIViewControllerBasedStatusBarAppearance"] is False

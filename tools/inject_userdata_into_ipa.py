@@ -87,6 +87,8 @@ def normalized_info_plist(source: bytes) -> bytes:
         if isinstance(version, str) and version.startswith("v"):
             info[key] = version[1:]
     info["CFBundleSupportedPlatforms"] = ["iPhoneOS"]
+    info["UIFileSharingEnabled"] = False
+    info["LSSupportsOpeningDocumentsInPlace"] = False
     validate_sideloadly_metadata(info)
     return plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False)
 

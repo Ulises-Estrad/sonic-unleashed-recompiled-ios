@@ -18,6 +18,8 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
+from hide_chip_models import hide_chip_models
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = REPOSITORY_ROOT / "arcade" / "stages.json"
@@ -335,6 +337,10 @@ def build(
             work_root / "SonicActionCommon" / "EnemySonic.prm.xml",
         )
 
+        system_common = temporary_root / "extracted" / "SystemCommon"
+        run_extract(hedge_arc_pack, data_root / "game" / "SystemCommon.arl", system_common)
+        hide_chip_models(system_common, work_root / "SystemCommon")
+
         for country in catalog["countries"]:
             for stage in country["stages"]:
                 archive = stage["archive"]
@@ -351,6 +357,14 @@ def build(
                     work_root / archive / "Stage.stg.xml",
                 )
                 manifest["removed_collectible_layers"][archive] = removed
+                # The stage archive can override the shared enemy table.
+                stage_enemy_parameters = extracted / "EnemySonic.prm.xml"
+                if stage_enemy_parameters.is_file():
+                    manifest.setdefault("stage_experience_rewards_zeroed", {})[archive] = (
+                        zero_experience_rewards(
+                            stage_enemy_parameters, work_root / archive / "EnemySonic.prm.xml"
+                        )
+                    )
 
         eggman_source = locate_eggmanland_xml(eggmanland_mod, temporary_root)
         if eggman_source.is_file():

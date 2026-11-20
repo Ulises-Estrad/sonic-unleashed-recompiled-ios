@@ -2156,10 +2156,10 @@ index 0000000..736b084
 +}
 +}
 diff --git a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-index 817db38..c890dc5 100644
+index 817db38..0b3f965 100644
 --- a/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
 +++ b/UnleashedRecomp/res/ios/iOSBundleInfo.plist.in
-@@ -6,28 +6,73 @@
+@@ -6,36 +6,87 @@
          <key>CFBundleDevelopmentRegion</key>
          <string>en</string>
          <key>CFBundleExecutable</key>
@@ -2194,6 +2194,7 @@ index 817db38..c890dc5 100644
 -        <string>Unleashed Recompiled</string>
 -        <key>CFBundleIconName</key>
 -        <string>AppIcon</string>
+-        <key>UIFileSharingEnabled</key>
 +        <string>Sonic Unleashed</string>
 +        <key>CFBundleIconFiles</key>
 +        <array>
@@ -2231,15 +2232,17 @@ index 817db38..c890dc5 100644
 +            </dict>
 +        </dict>
 +        <key>LSRequiresIPhoneOS</key>
-+        <true />
+         <true />
 +        <key>UIRequiredDeviceCapabilities</key>
 +        <array>
 +            <string>arm64</string>
 +        </array>
-         <key>UIFileSharingEnabled</key>
-         <true />
++        <key>UIFileSharingEnabled</key>
++        <false />
          <key>LSSupportsOpeningDocumentsInPlace</key>
-@@ -36,6 +81,12 @@
+-        <true />
++        <false />
+         <key>NSDocumentsFolderUsageDescription</key>
          <string>Allows access to game files and user-provided content.</string>
          <key>UIApplicationSupportsIndirectInputEvents</key>
          <true />
